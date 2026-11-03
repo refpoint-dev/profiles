@@ -1,0 +1,394 @@
+# harbor.yml: the installer input that holds hostnames, ports, passwords and
+# component settings. Every control here is gated on the file being present.
+
+control "harbor-cfg-01" {
+  title       = "hostname is a real address, not a placeholder or loopback"
+  description = "hostname is the address clients push to and the name written into every registry token and redirect. localhost, 127.0.0.1, 0.0.0.0 and the template placeholder reg.mydomain.com produce tokens no other host can use."
+  remediation = "Set hostname in ${var.config_file} to the FQDN clients use, run ./prepare and docker compose up -d."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "config"
+    severity = "medium"
+    nist     = "CM-6"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.config_file
+    exists = true
+  }
+  check "hostname" "file" {
+    path = var.config_file
+    content_match {
+      pattern = "^hostname:\\s*\\S+"
+      mode    = "regex"
+    }
+    content_match {
+      pattern = "^hostname:\\s*['\"]?(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|reg\\.mydomain\\.com)['\"]?\\s*$"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "harbor-cfg-02" {
+  title       = "HTTPS is configured with a certificate and private key"
+  description = "Without an https block the portal, API and registry protocol run in clear text and every push carries credentials and bearer tokens unencrypted. Skipped when allow_http_only is true."
+  remediation = "Uncomment the https block in ${var.config_file}, point certificate and private_key at the server certificate and key, run ./prepare and docker compose up -d."
+  impact      = 0.9
+  tags = {
+    app      = "harbor"
+    category = "tls"
+    severity = "critical"
+    nist     = "SC-8,SC-13"
+    iso27001 = "A.8.24,A.8.20"
+  }
+  ref {
+    title = "Harbor: Configure HTTPS Access to Harbor"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-https/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8, SC-13"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.allow_http_only}' | grep -qx false && test -f '${var.config_file}'"
+    exit_status = 0
+  }
+  check "https-block" "file" {
+    path = var.config_file
+    content_match {
+      pattern = "^https:\\s*$"
+      mode    = "regex"
+    }
+    content_match {
+      pattern = "^\\s+certificate:\\s*\\S+"
+      mode    = "regex"
+    }
+    content_match {
+      pattern = "^\\s+private_key:\\s*\\S+"
+      mode    = "regex"
+    }
+    content_match {
+      pattern = "^\\s+(certificate|private_key):\\s*/your/(certificate|private/key)/path"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "harbor-cfg-03" {
+  title       = "Initial administrator password is not the vendor default"
+  description = "harbor_admin_password seeds the admin account at first start. Leaving ${var.default_admin_password} in the file means a fresh or re-initialised deployment comes up with the published default."
+  remediation = "Set harbor_admin_password in ${var.config_file} to a strong unique value before the first start; change the live password in the portal if Harbor is already running."
+  impact      = 0.9
+  tags = {
+    app      = "harbor"
+    category = "auth"
+    severity = "critical"
+    nist     = "IA-5"
+    iso27001 = "A.5.17"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.config_file
+    exists = true
+  }
+  check "admin-password" "file" {
+    path = var.config_file
+    content_match {
+      pattern = "^harbor_admin_password:\\s*['\"]?${var.default_admin_password}['\"]?\\s*$"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "harbor-cfg-04" {
+  title       = "Bundled database password is not the vendor default"
+  description = "database.password is the PostgreSQL superuser password shared with core, jobservice and the exporter. The template ships ${var.default_db_password}; the documentation requires changing it for production. Skipped when no local database block exists (external database)."
+  remediation = "Set database.password in ${var.config_file} to a strong value, then run ./prepare and recreate the containers (the bundled database picks the password up from its env file on first initialisation only)."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "auth"
+    severity = "high"
+    nist     = "IA-5"
+    iso27001 = "A.5.17,A.8.3"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.17, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test -f '${var.config_file}' && grep -qE '^database:[[:space:]]*$' '${var.config_file}'"
+    exit_status = 0
+  }
+  check "db-password" "command" {
+    cmd         = "awk '/^database:/{f=1;next} /^[^[:space:]#]/{f=0} f' '${var.config_file}' | grep -cE \"^[[:space:]]+password:[[:space:]]*['\\\"]?${var.default_db_password}['\\\"]?[[:space:]]*$\""
+    stdout_match {
+      pattern = "0"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-cfg-05" {
+  title       = "Strong TLS cipher list is enabled on the proxy"
+  description = "https.strong_ssl_ciphers: true makes the proxy offer only a hardened cipher list instead of the permissive default. Checked only when require_strong_ciphers is true and HTTPS is in use."
+  remediation = "Set strong_ssl_ciphers: true under https in ${var.config_file}, run ./prepare and recreate the proxy container."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "tls"
+    severity = "medium"
+    nist     = "SC-8,SC-13"
+    iso27001 = "A.8.24"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8, SC-13"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.require_strong_ciphers}' | grep -qx true && printf '%s' '${var.allow_http_only}' | grep -qx false && test -f '${var.config_file}'"
+    exit_status = 0
+  }
+  check "strong-ciphers" "command" {
+    cmd         = "awk '/^https:/{f=1;next} /^[^[:space:]#]/{f=0} f' '${var.config_file}' | grep -qE '^[[:space:]]+strong_ssl_ciphers:[[:space:]]*true[[:space:]]*$'"
+    exit_status = 0
+  }
+}
+
+control "harbor-cfg-06" {
+  title       = "Internal TLS between components is enabled"
+  description = "By default core, jobservice, portal, registry, registryctl and the scanner talk plain HTTP on the harbor network. internal_tls.enabled: true encrypts that traffic with certificates the prepare tool generates. Checked only when require_internal_tls is true."
+  remediation = "Set internal_tls.enabled: true and internal_tls.dir: ${var.internal_tls_dir} in ${var.config_file}, generate the certificates with the prepare gencert command and recreate the containers."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "tls"
+    severity = "medium"
+    nist     = "SC-8"
+    iso27001 = "A.8.24,A.8.20"
+  }
+  ref {
+    title = "Harbor: Configure Internal TLS communication between Harbor Component"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-internal-tls/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.require_internal_tls}' | grep -qx true && test -f '${var.config_file}'"
+    exit_status = 0
+  }
+  check "internal-tls-enabled" "command" {
+    cmd         = "awk '/^internal_tls:/{f=1;next} /^[^[:space:]#]/{f=0} f' '${var.config_file}' | grep -qE '^[[:space:]]+enabled:[[:space:]]*true[[:space:]]*$'"
+    exit_status = 0
+  }
+  check "internal-tls-dir" "directory" {
+    path   = var.internal_tls_dir
+    exists = true
+  }
+}
+
+control "harbor-cfg-07" {
+  title       = "Trivy does not skip TLS verification when fetching its database"
+  description = "trivy.insecure: true disables certificate verification for the vulnerability database download, letting a network attacker feed the scanner a tampered database. Checked only when require_scanner is true."
+  remediation = "Set trivy.insecure: false in ${var.config_file}; if a private mirror with a private CA is used, add the CA to common/config/shared/trust-certificates instead."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "scanning"
+    severity = "medium"
+    nist     = "SC-8,SI-3"
+    iso27001 = "A.8.8,A.8.24"
+  }
+  ref {
+    title = "Harbor: Vulnerability Scanning"
+    url   = "https://goharbor.io/docs/2.15.0/administration/vulnerability-scanning/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8, SI-3"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8, A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.require_scanner}' | grep -qx true && test -f '${var.config_file}'"
+    exit_status = 0
+  }
+  check "trivy-insecure" "command" {
+    cmd         = "awk '/^trivy:/{f=1;next} /^[^[:space:]#]/{f=0} f' '${var.config_file}' | grep -cE '^[[:space:]]+insecure:[[:space:]]*true[[:space:]]*$'"
+    stdout_match {
+      pattern = "0"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-cfg-08" {
+  title       = "Log level is not debug and local logs rotate"
+  description = "log.level: debug writes request bodies and tokens into the component logs. log.local.rotate_count must be at least 1 so the collector rotates instead of growing without bound."
+  remediation = "Set log.level to info and log.local.rotate_count to a positive number in ${var.config_file}, run ./prepare and recreate the log container."
+  impact      = 0.5
+  tags = {
+    app      = "harbor"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-4,AU-9,SI-11"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-4, AU-9, SI-11"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.config_file
+    exists = true
+  }
+  check "log-level" "command" {
+    cmd         = "awk '/^log:/{f=1;next} /^[^[:space:]#]/{f=0} f' '${var.config_file}' | grep -cE '^[[:space:]]+level:[[:space:]]*debug[[:space:]]*$'"
+    stdout_match {
+      pattern = "0"
+      mode    = "exact"
+    }
+  }
+  check "rotate-count" "file" {
+    path = var.config_file
+    content_match {
+      pattern = "^\\s+rotate_count:\\s*[1-9][0-9]*\\s*$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-cfg-09" {
+  title       = "harbor.yml is owned by the operator and closed to other users"
+  description = "The file holds the initial admin password, the database password and any external database, redis or storage credentials. It must not be readable by unprivileged users."
+  remediation = "chown ${var.config_owner} ${var.config_file} && chmod 0640 ${var.config_file}"
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "secrets"
+    severity = "high"
+    nist     = "AC-3,AC-6,SC-28"
+    iso27001 = "A.8.3,A.5.15"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6, SC-28"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.5.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.config_file
+    exists = true
+  }
+  check "config-perms" "file" {
+    path        = var.config_file
+    owner       = var.config_owner
+    permissions = "<= 0640"
+  }
+}
+
+control "harbor-cfg-10" {
+  title       = "data_volume matches the data directory this profile inspects"
+  description = "The filesystem controls read data_dir. If harbor.yml points somewhere else the data protection results describe the wrong directory."
+  remediation = "Run with --var data_dir=<value of data_volume>, or set data_volume: ${var.data_dir} in ${var.config_file}."
+  impact      = 0.3
+  tags = {
+    app      = "harbor"
+    category = "config"
+    severity = "low"
+    nist     = "CM-6"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.config_file
+    exists = true
+  }
+  check "data-volume" "file" {
+    path = var.config_file
+    content_match {
+      pattern = "^data_volume:\\s*['\"]?${var.data_dir}/?['\"]?\\s*$"
+      mode    = "regex"
+    }
+  }
+}

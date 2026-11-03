@@ -1,0 +1,11 @@
+profile "example" {
+  title       = "Example Baseline"
+  description = "A minimal profile showing refpoint's profile, control, and check syntax. Runs against the local target."
+  version     = "0.1.0"
+  author      = "refpoint"
+
+  # Declare every executable the command checks below need. This is a
+  # self-limit, not a grant: the operator's --allowed-commands remains
+  # the ceiling.
+  allowed_commands = ["uname"]
+}

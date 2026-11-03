@@ -1,0 +1,262 @@
+# Kernel hardening sysctls and core dump restrictions, plus the kernel self
+# protection settings from the Kernel Self Protection Project.
+
+control "base-kern-01" {
+  title       = "Address space layout randomisation is fully enabled"
+  description = "kernel.randomize_va_space=2 randomises the stack, mmap base, VDSO and heap of every process, which is what makes memory corruption bugs hard to exploit reliably."
+  remediation = "Set 'kernel.randomize_va_space = 2' in /etc/sysctl.d/60-kernel.conf and run 'sysctl --system'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "high"
+    nist     = "SI-16"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-16"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "randomize-va-space" "kernel_param" {
+    param = "kernel.randomize_va_space"
+    value = "2"
+  }
+}
+
+control "base-kern-02" {
+  title       = "Setuid programs cannot dump core"
+  description = "A core dump of a setuid program can contain the privileged data it was handling (shadow hashes, keys). fs.suid_dumpable=0 disables it."
+  remediation = "Set 'fs.suid_dumpable = 0' in /etc/sysctl.d/60-kernel.conf and run 'sysctl --system'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "medium"
+    nist     = "SC-28,SI-16"
+    iso27001 = "A.8.9,A.8.12"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-28, SI-16"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.12"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "suid-dumpable" "kernel_param" {
+    param = "fs.suid_dumpable"
+    value = "0"
+  }
+}
+
+control "base-kern-03" {
+  title       = "Kernel pointers and the kernel log are hidden from unprivileged users"
+  description = "kernel.kptr_restrict of 1 or 2 stops /proc and dmesg from leaking kernel addresses that defeat KASLR; kernel.dmesg_restrict=1 keeps the kernel log, which contains those addresses and hardware details, to root."
+  remediation = "Set 'kernel.kptr_restrict = 2' and 'kernel.dmesg_restrict = 1' in /etc/sysctl.d/60-kernel.conf and run 'sysctl --system'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "medium"
+    nist     = "SC-39,SI-16"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "Kernel Self Protection Project: recommended settings"
+    url   = "https://kernsec.org/wiki/index.php/Kernel_Self_Protection_Project/Recommended_Settings"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-39, SI-16"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "kptr-restrict" {
+    check "kptr-restrict-1" "kernel_param" {
+      param = "kernel.kptr_restrict"
+      value = "1"
+    }
+    check "kptr-restrict-2" "kernel_param" {
+      param = "kernel.kptr_restrict"
+      value = "2"
+    }
+  }
+
+  check "dmesg-restrict" "kernel_param" {
+    param = "kernel.dmesg_restrict"
+    value = "1"
+  }
+}
+
+control "base-kern-04" {
+  title       = "Hardlink and symlink protections are enabled"
+  description = "fs.protected_hardlinks=1 and fs.protected_symlinks=1 close the classic time-of-check races in world-writable directories where a user plants a link that a privileged process follows."
+  remediation = "Set 'fs.protected_hardlinks = 1' and 'fs.protected_symlinks = 1' in /etc/sysctl.d/60-kernel.conf and run 'sysctl --system'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "medium"
+    nist     = "AC-3,SI-16"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "Kernel documentation: /proc/sys/fs (protected_symlinks, protected_hardlinks)"
+    url   = "https://www.kernel.org/doc/html/latest/admin-guide/sysctl/fs.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, SI-16"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "protected-hardlinks" "kernel_param" {
+    param = "fs.protected_hardlinks"
+    value = "1"
+  }
+
+  check "protected-symlinks" "kernel_param" {
+    param = "fs.protected_symlinks"
+    value = "1"
+  }
+}
+
+control "base-kern-05" {
+  title       = "ptrace is restricted to descendants"
+  description = "With kernel.yama.ptrace_scope at 0 any process can attach a debugger to any other process of the same user and read its memory, including credentials held by agents. A value of 1 or higher limits attachment to descendants (1), CAP_SYS_PTRACE holders (2) or nobody (3)."
+  remediation = "Set 'kernel.yama.ptrace_scope = 1' in /etc/sysctl.d/60-kernel.conf and run 'sysctl --system'; the Yama LSM must be built into the kernel."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "medium"
+    nist     = "AC-6,SC-39"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "Kernel documentation: Yama LSM"
+    url   = "https://www.kernel.org/doc/html/latest/admin-guide/LSM/Yama.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, SC-39"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "ptrace-scope" {
+    check "ptrace-scope-1" "kernel_param" {
+      param = "kernel.yama.ptrace_scope"
+      value = "1"
+    }
+    check "ptrace-scope-2" "kernel_param" {
+      param = "kernel.yama.ptrace_scope"
+      value = "2"
+    }
+    check "ptrace-scope-3" "kernel_param" {
+      param = "kernel.yama.ptrace_scope"
+      value = "3"
+    }
+  }
+}
+
+control "base-kern-06" {
+  title       = "Core dumps are disabled for all users"
+  description = "Core files can expose secrets from process memory and fill the filesystem. A hard core limit of 0 must be set in limits.conf or a limits.d fragment, and where systemd-coredump is present it must not store dumps."
+  remediation = "Add '* hard core 0' to ${var.limits_conf} or ${var.limits_dir}/99-core.conf; where ${var.coredump_conf} exists set 'Storage=none' and 'ProcessSizeMax=0' under [Coredump]."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "medium"
+    nist     = "SC-28,SI-16"
+    iso27001 = "A.8.9,A.8.12"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-28, SI-16"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.12"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "hard-core-zero" {
+    check "limits-conf" "file" {
+      path = var.limits_conf
+      content_match {
+        pattern = "^\\s*\\*\\s+hard\\s+core\\s+0\\s*$"
+        mode    = "regex"
+      }
+    }
+    check "limits-d" "folder_contents" {
+      path = var.limits_dir
+      glob = "*.conf"
+      content_match {
+        pattern = "^\\s*\\*\\s+hard\\s+core\\s+0\\s*$"
+        mode    = "regex"
+      }
+    }
+  }
+}
+
+control "base-kern-07" {
+  title       = "systemd-coredump does not store dumps"
+  description = "Where systemd-coredump is installed it intercepts core dumps regardless of the ulimit and stores them under /var/lib/systemd/coredump. Storage=none or ProcessSizeMax=0 must be set so nothing is kept. Runs only where the configuration file exists."
+  remediation = "Set 'Storage=none' and 'ProcessSizeMax=0' under [Coredump] in ${var.coredump_conf} and run 'systemctl daemon-reload'."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "low"
+    nist     = "SC-28"
+    iso27001 = "A.8.12"
+  }
+  ref {
+    title = "coredump.conf manual page"
+    url   = "https://www.freedesktop.org/software/systemd/man/latest/coredump.conf.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-28"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.12"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.coredump_conf
+    exists = true
+  }
+
+  any_of "coredump-disabled" {
+    check "storage-none" "file" {
+      path = var.coredump_conf
+      content_match {
+        pattern = "^\\s*Storage\\s*=\\s*none\\s*$"
+        mode    = "regex"
+      }
+    }
+    check "process-size-max-zero" "file" {
+      path = var.coredump_conf
+      content_match {
+        pattern = "^\\s*ProcessSizeMax\\s*=\\s*0\\s*$"
+        mode    = "regex"
+      }
+    }
+  }
+}

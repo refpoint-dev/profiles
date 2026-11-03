@@ -1,0 +1,459 @@
+# Health, version and system settings, probed through the proxy from the
+# target host itself. Unauthenticated checks read /api/v2.0/health and
+# /api/v2.0/systeminfo; the authenticated ones read /api/v2.0/configurations
+# and are skipped until api_password is supplied. Configuration output is
+# always reduced with grep -o to the one key under test so no other setting
+# lands in the report.
+
+control "harbor-api-01" {
+  title       = "Health endpoint reports every component healthy"
+  description = "GET /api/v2.0/health is unauthenticated and aggregates core, portal, jobservice, registry, registryctl, database, redis and the scanner. Any unhealthy component is named in the response."
+  remediation = "Read the components list in the health response, then the matching file in ${var.log_dir}; docker compose up -d restarts a stopped component."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "SI-4,CP-10"
+    iso27001 = "A.8.16,A.8.14"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-4, CP-10"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.16, A.8.14"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "health" "command" {
+    cmd         = "curl -ksS '${var.base_url}/api/v2.0/health'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^\\{\"status\":\"healthy\""
+      mode    = "regex"
+    }
+    stdout_match {
+      pattern = "\"status\":\"unhealthy\""
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "harbor-api-02" {
+  title       = "Harbor version meets the minimum floor"
+  description = "harbor_version from /api/v2.0/systeminfo must be at least min_version so releases with published fixed vulnerabilities are not in service."
+  remediation = "Download the current release bundle, follow the upgrade guide (back up ${var.data_dir} first) and re-run install.sh."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "updates"
+    severity = "high"
+    nist     = "SI-2"
+    iso27001 = "A.8.8"
+  }
+  ref {
+    title = "Harbor: Upgrade Harbor and Migrate Data"
+    url   = "https://goharbor.io/docs/2.15.0/administration/upgrade/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "version-floor" "command" {
+    cmd         = "printf '%s\\n%s\\n' '${var.min_version}' \"$(curl -ksS '${var.base_url}/api/v2.0/systeminfo' | grep -oE '\"harbor_version\":\"v?[0-9]+\\.[0-9]+\\.[0-9]+' | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -n1)\" | sort -V -C"
+    exit_status = 0
+  }
+}
+
+control "harbor-api-03" {
+  title       = "Default administrator password is rejected"
+  description = "Basic authentication as admin with the vendor default password must not be accepted by the API."
+  remediation = "Log in as admin, open the user menu and change the password; then update harbor_admin_password in ${var.config_file} so a re-initialisation does not restore the default."
+  impact      = 1.0
+  tags = {
+    app      = "harbor"
+    category = "auth"
+    severity = "critical"
+    nist     = "IA-5"
+    iso27001 = "A.5.17"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "default-password-rejected" "command" {
+    cmd         = "curl -ksS -o /dev/null -w '%%{http_code}' -u 'admin:${var.default_admin_password}' '${var.base_url}/api/v2.0/users/current'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^(401|403)$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-api-04" {
+  title       = "Self-registration is disabled"
+  description = "With self_registration on, anyone who can reach the portal creates an account and, depending on project_creation_restriction, projects and storage."
+  remediation = "In Administration > Configuration > Authentication clear Allow Self-Registration."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "auth"
+    severity = "high"
+    nist     = "AC-2,IA-4"
+    iso27001 = "A.5.16,A.5.18"
+  }
+  ref {
+    title = "Harbor: Configure Authentication"
+    url   = "https://goharbor.io/docs/2.15.0/administration/configure-authentication/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-2, IA-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.16, A.5.18"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "self-registration" "command" {
+    cmd         = "curl -ksS '${var.base_url}/api/v2.0/systeminfo' | grep -oE '\"self_registration\":(true|false)'"
+    exit_status = 0
+    stdout_match {
+      pattern = "\"self_registration\":false"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-api-05" {
+  title       = "Project creation is restricted as configured"
+  description = "project_creation_restriction decides who can create projects and therefore consume storage and define access policies. The expected value is adminonly unless the profile is run with project_creation_restriction=everyone."
+  remediation = "In Administration > Configuration > System Settings set Project Creation to Admin Only."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "authz"
+    severity = "medium"
+    nist     = "AC-3,AC-6"
+    iso27001 = "A.5.15,A.8.3"
+  }
+  ref {
+    title = "Harbor: Configure Global Settings"
+    url   = "https://goharbor.io/docs/2.15.0/administration/general-settings/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.15, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "project-creation" "command" {
+    cmd         = "curl -ksS '${var.base_url}/api/v2.0/systeminfo' | grep -oE '\"project_creation_restriction\":\"[a-z]+\"'"
+    exit_status = 0
+    stdout_match {
+      pattern = "\"project_creation_restriction\":\"${var.project_creation_restriction}\""
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-api-06" {
+  title       = "Authentication is delegated to an external identity provider"
+  description = "auth_mode must be ldap_auth, oidc_auth, uaa_auth or http_auth so accounts, password policy and MFA are governed centrally instead of in the local database. Checked only when require_external_auth is true."
+  remediation = "In Administration > Configuration > Authentication switch Auth Mode to LDAP or OIDC before any non-admin user exists (the mode is locked once local users have been created)."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "auth"
+    severity = "medium"
+    nist     = "IA-2,IA-8"
+    iso27001 = "A.5.16,A.8.5"
+  }
+  ref {
+    title = "Harbor: Configure Authentication"
+    url   = "https://goharbor.io/docs/2.15.0/administration/configure-authentication/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-2, IA-8"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.16, A.8.5"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.require_external_auth}' | grep -qx true && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "auth-mode" "command" {
+    cmd         = "curl -ksS '${var.base_url}/api/v2.0/systeminfo' | grep -oE '\"auth_mode\":\"[a-z_]+\"'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^\"auth_mode\":\"(ldap_auth|oidc_auth|uaa_auth|http_auth)\"$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-api-07" {
+  title       = "Vulnerability scanner is deployed"
+  description = "with_trivy in systeminfo is true only when the Trivy adapter was installed; without a scanner no image is ever assessed and 'prevent vulnerable images from running' policies cannot be enforced. Checked only when require_scanner is true."
+  remediation = "Re-run ./install.sh --with-trivy from ${var.harbor_dir} (data in ${var.data_dir} is preserved)."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "scanning"
+    severity = "high"
+    nist     = "RA-5,SI-3"
+    iso27001 = "A.8.8"
+  }
+  ref {
+    title = "Harbor: Vulnerability Scanning"
+    url   = "https://goharbor.io/docs/2.15.0/administration/vulnerability-scanning/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: RA-5, SI-3"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.require_scanner}' | grep -qx true && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "with-trivy" "command" {
+    cmd         = "curl -ksS '${var.base_url}/api/v2.0/systeminfo' | grep -oE '\"with_trivy\":(true|false)'"
+    exit_status = 0
+    stdout_match {
+      pattern = "\"with_trivy\":true"
+      mode    = "exact"
+    }
+  }
+  check "scanner-container" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.trivy_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-api-08" {
+  title       = "Registry is not left in read-only mode"
+  description = "read_only is a maintenance switch that rejects every push and delete. Left on after garbage collection it silently breaks CI pipelines."
+  remediation = "In Administration > Configuration > System Settings clear Repository Read Only once maintenance is finished."
+  impact      = 0.3
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "low"
+    nist     = "CM-6"
+    iso27001 = "A.8.14"
+  }
+  ref {
+    title = "Harbor: Configure Global Settings"
+    url   = "https://goharbor.io/docs/2.15.0/administration/general-settings/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "read-only" "command" {
+    cmd         = "curl -ksS '${var.base_url}/api/v2.0/systeminfo' | grep -oE '\"read_only\":(true|false)'"
+    exit_status = 0
+    stdout_match {
+      pattern = "\"read_only\":false"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-api-09" {
+  title       = "Registry bearer tokens expire within the configured maximum"
+  description = "token_expiration is the lifetime in minutes of the tokens docker login obtains; a stolen token is usable until it expires. Requires api_password."
+  remediation = "In Administration > Configuration > System Settings set Token Expiration to ${var.max_token_expiration_minutes} minutes or less."
+  impact      = 0.5
+  tags = {
+    app      = "harbor"
+    category = "auth"
+    severity = "medium"
+    nist     = "IA-5,AC-12"
+    iso27001 = "A.5.17,A.8.5"
+  }
+  ref {
+    title = "Harbor: Configure Global Settings"
+    url   = "https://goharbor.io/docs/2.15.0/administration/general-settings/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-5, AC-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.17, A.8.5"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.api_password}' != 'CHANGE_ME' && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "token-expiration" "command" {
+    cmd         = "curl -ksS -u '${var.api_user}:${var.api_password}' '${var.base_url}/api/v2.0/configurations' | grep -oE '\"token_expiration\":\\{[^}]*\"value\":[0-9]+' | grep -oE '[0-9]+$' | awk -v m='${var.max_token_expiration_minutes}' '{ok = ($1 + 0 <= m + 0); print} END{exit !(NR == 1 && ok)}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-api-10" {
+  title       = "Default robot account lifetime is within the configured maximum"
+  description = "robot_token_duration is the default validity in days offered when a robot account is created; long-lived robot secrets end up in CI configuration and are rarely rotated. Requires api_password."
+  remediation = "In Administration > Configuration > System Settings set Robot Token Expiration to ${var.max_robot_token_days} days or less."
+  impact      = 0.5
+  tags = {
+    app      = "harbor"
+    category = "auth"
+    severity = "medium"
+    nist     = "IA-5,AC-2"
+    iso27001 = "A.5.17,A.5.16"
+  }
+  ref {
+    title = "Harbor: Create Robot Accounts"
+    url   = "https://goharbor.io/docs/2.15.0/administration/robot-accounts/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-5, AC-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.17, A.5.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.api_password}' != 'CHANGE_ME' && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "robot-token-duration" "command" {
+    cmd         = "curl -ksS -u '${var.api_user}:${var.api_password}' '${var.base_url}/api/v2.0/configurations' | grep -oE '\"robot_token_duration\":\\{[^}]*\"value\":[0-9]+' | grep -oE '[0-9]+$' | awk -v m='${var.max_robot_token_days}' '{ok = ($1 + 0 <= m + 0); print} END{exit !(NR == 1 && ok)}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-api-11" {
+  title       = "Web session timeout is within the configured maximum"
+  description = "session_timeout is the idle lifetime in minutes of a portal session. Requires api_password."
+  remediation = "In Administration > Configuration > System Settings set Session Timeout to ${var.max_session_timeout_minutes} minutes or less."
+  impact      = 0.4
+  tags = {
+    app      = "harbor"
+    category = "auth"
+    severity = "medium"
+    nist     = "AC-11,AC-12"
+    iso27001 = "A.8.5"
+  }
+  ref {
+    title = "Harbor: Configure Global Settings"
+    url   = "https://goharbor.io/docs/2.15.0/administration/general-settings/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-11, AC-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.5"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.api_password}' != 'CHANGE_ME' && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "session-timeout" "command" {
+    cmd         = "curl -ksS -u '${var.api_user}:${var.api_password}' '${var.base_url}/api/v2.0/configurations' | grep -oE '\"session_timeout\":\\{[^}]*\"value\":[0-9]+' | grep -oE '[0-9]+$' | awk -v m='${var.max_session_timeout_minutes}' '{ok = ($1 + 0 <= m + 0); print} END{exit !(NR == 1 && ok)}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-api-12" {
+  title       = "A scan-all schedule is configured"
+  description = "scan_all_policy must schedule daily, weekly or custom scans so images already in the registry are re-assessed as new vulnerabilities are published, not only on push. Checked only when require_scanner is true; requires api_password."
+  remediation = "In Administration > Interrogation Services > Vulnerability set a scan schedule (Daily or Weekly)."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "scanning"
+    severity = "medium"
+    nist     = "RA-5,SI-2"
+    iso27001 = "A.8.8"
+  }
+  ref {
+    title = "Harbor: Vulnerability Scanning"
+    url   = "https://goharbor.io/docs/2.15.0/administration/vulnerability-scanning/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: RA-5, SI-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.require_scanner}' | grep -qx true && test '${var.api_password}' != 'CHANGE_ME' && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "scan-all-policy" "command" {
+    cmd         = "curl -ksS -u '${var.api_user}:${var.api_password}' '${var.base_url}/api/v2.0/configurations' | grep -oE '\"scan_all_policy\":\\{\"value\":\\{\"type\":\"[a-z]+\"'"
+    exit_status = 0
+    stdout_match {
+      pattern = "\"type\":\"(daily|weekly|custom)\"$"
+      mode    = "regex"
+    }
+  }
+}

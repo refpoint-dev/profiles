@@ -1,0 +1,403 @@
+# Posture of the containers currently running. Every control is gated on at
+# least one container being up so an idle host is skipped, not failed.
+
+control "docker-container-01" {
+  title       = "No running container is privileged"
+  description = "A privileged container has every capability and raw device access; it is host root with extra steps."
+  remediation = "Remove privileged: true (or --privileged) from the offending service and grant the specific capabilities it needs with cap_add."
+  impact      = 0.9
+  tags = {
+    app      = "docker"
+    category = "container"
+    severity = "critical"
+    nist     = "AC-6,CM-7"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "privileged" "command" {
+    cmd = "docker ps -q | xargs -r docker inspect --format '{{.Name}} {{.HostConfig.Privileged}}'"
+    stdout_match {
+      pattern = " true$"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-02" {
+  title       = "No container shares the host network namespace unless approved"
+  description = "network_mode: host removes network isolation and lets a container bind any host port. Only the containers listed in allowed_host_network_containers may use it."
+  remediation = "Replace network_mode: host with a user-defined bridge network and explicit port publishing, or add the container to allowed_host_network_containers."
+  impact      = 0.8
+  tags = {
+    app      = "docker"
+    category = "container"
+    severity = "high"
+    nist     = "SC-7,CM-7"
+    iso27001 = "A.8.20,A.8.22"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.22"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "host-network" "command" {
+    cmd = "docker ps -q | xargs -r docker inspect --format '{{.Name}} {{.HostConfig.NetworkMode}}' | grep -E ' host$' | grep -vE '^/(${join("|", var.allowed_host_network_containers)}) '"
+    stdout_match {
+      pattern = "\\S"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-03" {
+  title       = "No container mounts the Docker socket unless approved"
+  description = "A container with ${var.docker_socket} mounted controls the daemon and thereby the host. Only the containers listed in allowed_socket_containers (reverse proxies, updaters) may mount it."
+  remediation = "Remove the ${var.docker_socket} volume from the offending service, or proxy the API with a filtered socket proxy, or add the container to allowed_socket_containers."
+  impact      = 0.9
+  tags = {
+    app      = "docker"
+    category = "container"
+    severity = "critical"
+    nist     = "AC-6,AC-3"
+    iso27001 = "A.8.2,A.8.3"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, AC-3"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "socket-mounts" "command" {
+    cmd = "docker ps -q | xargs -r docker inspect --format '{{$n := .Name}}{{range .Mounts}}{{$n}} {{.Source}}{{\"\\n\"}}{{end}}' | grep -E ' (/var/run/docker\\.sock|/run/docker\\.sock)$' | grep -vE '^/(${join("|", var.allowed_socket_containers)}) '"
+    stdout_match {
+      pattern = "\\S"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-04" {
+  title       = "No container bind-mounts a sensitive host directory"
+  description = "Mounting /, /etc, /boot, /dev, /proc, /sys, /usr or the Docker data root into a container lets it modify the host. Mount sources are matched against ${var.sensitive_host_dirs_pattern}."
+  remediation = "Narrow the bind mount to the specific subdirectory the container needs, read-only where possible."
+  impact      = 0.8
+  tags = {
+    app      = "docker"
+    category = "container"
+    severity = "high"
+    nist     = "AC-3,AC-6,SC-39"
+    iso27001 = "A.8.3,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6, SC-39"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "mount-sources" "command" {
+    cmd = "docker ps -q | xargs -r docker inspect --format '{{range .Mounts}}{{if eq .Type \"bind\"}}{{.Source}}{{\"\\n\"}}{{end}}{{end}}'"
+    stdout_match {
+      pattern = var.sensitive_host_dirs_pattern
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-05" {
+  title       = "No container shares the host PID, IPC or UTS namespace"
+  description = "pid: host lets a container see and signal every host process; ipc: host exposes shared memory; uts: host lets it change the hostname."
+  remediation = "Remove pid: host, ipc: host and uts: host from the offending service definitions."
+  impact      = 0.8
+  tags = {
+    app      = "docker"
+    category = "container"
+    severity = "high"
+    nist     = "SC-39,CM-7"
+    iso27001 = "A.8.3,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-39, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "namespaces" "command" {
+    cmd = "docker ps -q | xargs -r docker inspect --format '{{.Name}} pid={{.HostConfig.PidMode}} ipc={{.HostConfig.IpcMode}} uts={{.HostConfig.UTSMode}}'"
+    stdout_match {
+      pattern = "(pid|ipc|uts)=host"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-06" {
+  title       = "No container is granted SYS_ADMIN or ALL capabilities"
+  description = "cap_add: SYS_ADMIN (or ALL) is equivalent to privileged for most escape techniques."
+  remediation = "Remove SYS_ADMIN and ALL from cap_add on the offending service; add only the individual capability required."
+  impact      = 0.8
+  tags = {
+    app      = "docker"
+    category = "container"
+    severity = "high"
+    nist     = "AC-6,CM-7"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "cap-add" "command" {
+    cmd = "docker ps -q | xargs -r docker inspect --format '{{.Name}} {{.HostConfig.CapAdd}}'"
+    stdout_match {
+      pattern = "\\b(CAP_)?(SYS_ADMIN|ALL)\\b"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-07" {
+  title       = "Running containers use pinned image tags"
+  description = "Images referenced as :latest or without a tag or digest cannot be audited or rolled back and may silently change on the next pull."
+  remediation = "Reference images as name:<version> or name@sha256:<digest> in every compose file and recreate the containers."
+  impact      = 0.6
+  tags = {
+    app      = "docker"
+    category = "updates"
+    severity = "medium"
+    nist     = "CM-2,SI-7"
+    iso27001 = "A.8.9,A.8.32"
+  }
+  ref {
+    title = "Docker docs: Image tags and digests"
+    url   = "https://docs.docker.com/reference/cli/docker/image/pull/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-2, SI-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.32"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "no-latest" "command" {
+    cmd = "docker ps --format '{{.Image}}'"
+    stdout_match {
+      pattern = ":latest$"
+      mode    = "regex"
+      negate  = true
+    }
+    stdout_match {
+      pattern = "^[^:@]+$"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-08" {
+  title       = "Every running container has a restart policy"
+  description = "Containers without a restart policy stay down after a crash or a daemon restart. The policy must match ${var.restart_policy_pattern}."
+  remediation = "Set restart: unless-stopped (or on-failure) on every long-running service and recreate the containers."
+  impact      = 0.4
+  tags = {
+    app      = "docker"
+    category = "availability"
+    severity = "low"
+    nist     = "CP-10,CM-6"
+    iso27001 = "A.8.14,A.8.9"
+  }
+  ref {
+    title = "Docker docs: Start containers automatically"
+    url   = "https://docs.docker.com/engine/containers/start-containers-automatically/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "restart-policy" "command" {
+    cmd = "docker ps -q | xargs -r docker inspect --format '{{.Name}} {{.HostConfig.RestartPolicy.Name}}' | grep -vE ' ${var.restart_policy_pattern}$'"
+    stdout_match {
+      pattern = "\\S"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-09" {
+  title       = "Every running container defines a health check"
+  description = "Only evaluated when health_checks_required is true. Without a HEALTHCHECK the daemon cannot distinguish a hung service from a healthy one."
+  remediation = "Add a healthcheck: block to each compose service (or HEALTHCHECK in the Dockerfile) and recreate the containers."
+  impact      = 0.3
+  tags = {
+    app      = "docker"
+    category = "availability"
+    severity = "low"
+    nist     = "SI-4,CP-10"
+    iso27001 = "A.8.16,A.8.14"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-4, CP-10"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.16, A.8.14"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.health_checks_required}' = 'true' && docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "healthcheck" "command" {
+    cmd = "docker ps -q | xargs -r docker inspect --format '{{.Name}} {{if .Config.Healthcheck}}yes{{else}}no{{end}}'"
+    stdout_match {
+      pattern = " no$"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-10" {
+  title       = "Containers do not publish ports on all interfaces without a host port restriction"
+  description = "Publishing to 0.0.0.0 exposes services past any host firewall rule that assumes loopback. Published ports must bind to a specific address; an empty result also passes."
+  remediation = "Publish as 127.0.0.1:<host>:<container> (or the LAN address) in the compose ports: list and recreate the container."
+  impact      = 0.5
+  tags = {
+    app      = "docker"
+    category = "network"
+    severity = "medium"
+    nist     = "SC-7,CM-7"
+    iso27001 = "A.8.20,A.8.21"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.21"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -q | grep -q ."
+    exit_status = 0
+  }
+  check "published-ports" "command" {
+    cmd = "docker ps --format '{{.Names}} {{.Ports}}'"
+    stdout_match {
+      pattern = "0\\.0\\.0\\.0:[0-9]+->"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-container-11" {
+  title       = "Compose stack directory and its environment file are restricted"
+  description = "Checked only when ${var.compose_dir} exists. Compose files reference secrets through .env; the directory must be root-owned and not world-accessible, and ${var.compose_env_file} readable by root only."
+  remediation = "chown -R root:root ${var.compose_dir} && chmod 0750 ${var.compose_dir} && chmod 0600 ${var.compose_env_file}"
+  impact      = 0.7
+  tags = {
+    app      = "docker"
+    category = "secrets"
+    severity = "high"
+    nist     = "AC-3,AC-6,IA-5"
+    iso27001 = "A.5.17,A.8.3"
+  }
+  ref {
+    title = "Docker docs: Set environment variables in Compose"
+    url   = "https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6, IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.17, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "directory" {
+    path   = var.compose_dir
+    exists = true
+  }
+  check "compose-dir" "directory" {
+    path        = var.compose_dir
+    owner       = "root"
+    permissions = "<= 0750"
+  }
+  check "env-file" "file" {
+    path        = var.compose_env_file
+    owner       = "root"
+    permissions = "<= 0600"
+  }
+  check "no-open-env-files" "command" {
+    cmd = "find '${var.compose_dir}' -maxdepth 3 -type f -name '*.env' -perm -o=r 2>/dev/null | head -n1"
+    stdout_match {
+      pattern = "\\S"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}

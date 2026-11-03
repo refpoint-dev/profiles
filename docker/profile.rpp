@@ -1,0 +1,245 @@
+profile "docker" {
+  title       = "Docker Engine Host Hardening"
+  description = "Daemon configuration, service state, socket and file permissions, audit rules, kernel parameters and running-container posture of a Docker Engine host. Every control is scoped to the host: daemon.json is read with the json resource, container posture through the docker CLI."
+  version     = "1.0.0"
+  author      = "refpoint"
+  platform    = ["linux"]
+
+  # Every executable a command check below runs, including those after pipes,
+  # in $( ) substitutions and as xargs arguments. The operator's
+  # --allowed-commands remains the ceiling.
+  allowed_commands = ["docker", "xargs", "grep", "printf", "sort", "head", "test", "find"]
+
+  # ------------------------------------------------------------- daemon
+  variable "daemon_json" {
+    type        = "string"
+    default     = "/etc/docker/daemon.json"
+    description = "Docker daemon configuration file; its presence selects the daemon.json controls"
+    validation {
+      condition     = var.daemon_json != ""
+      error_message = "daemon_json must not be empty"
+    }
+  }
+  variable "config_dir" {
+    type        = "string"
+    default     = "/etc/docker"
+    description = "Docker configuration directory (daemon.json, certs.d, key.json)"
+    validation {
+      condition     = var.config_dir != ""
+      error_message = "config_dir must not be empty"
+    }
+  }
+  variable "data_root" {
+    type        = "string"
+    default     = "/var/lib/docker"
+    description = "Docker data root holding image layers, volumes and container state"
+    validation {
+      condition     = var.data_root != ""
+      error_message = "data_root must not be empty"
+    }
+  }
+  variable "dockerd_binary" {
+    type        = "string"
+    default     = "/usr/bin/dockerd"
+    description = "Path of the dockerd executable (audited for changes)"
+  }
+  variable "default_file" {
+    type        = "string"
+    default     = "/etc/default/docker"
+    description = "Legacy environment file read by the docker unit on Debian-style hosts; checked only when present"
+  }
+  variable "docker_socket" {
+    type        = "string"
+    default     = "/var/run/docker.sock"
+    description = "Path of the Docker API unix socket"
+    validation {
+      condition     = var.docker_socket != ""
+      error_message = "docker_socket must not be empty"
+    }
+  }
+  variable "docker_unit" {
+    type        = "string"
+    default     = "docker"
+    description = "systemd service unit of the Docker daemon"
+  }
+  variable "docker_socket_unit" {
+    type        = "string"
+    default     = "docker.socket"
+    description = "systemd socket unit that activates the daemon"
+  }
+  variable "containerd_unit" {
+    type        = "string"
+    default     = "containerd"
+    description = "systemd service unit of the containerd runtime the daemon delegates to"
+  }
+  variable "docker_unit_file" {
+    type        = "string"
+    default     = "/usr/lib/systemd/system/docker.service"
+    description = "Path of the docker.service unit file (Debian/Ubuntu: /lib/systemd/system/docker.service)"
+  }
+  variable "docker_socket_unit_file" {
+    type        = "string"
+    default     = "/usr/lib/systemd/system/docker.socket"
+    description = "Path of the docker.socket unit file"
+  }
+  variable "audit_service" {
+    type        = "string"
+    default     = "auditd"
+    description = "systemd unit of the Linux audit daemon; the audit-rule controls are skipped when it is not running"
+  }
+  variable "docker_group" {
+    type        = "string"
+    default     = "docker"
+    description = "Group that owns the API socket; membership is equivalent to root"
+    validation {
+      condition     = var.docker_group != ""
+      error_message = "docker_group must not be empty"
+    }
+  }
+  variable "docker_group_members" {
+    type        = "list(string)"
+    default     = []
+    description = "Accounts allowed to be members of the docker group; any other member fails the membership control"
+  }
+  variable "min_version" {
+    type        = "string"
+    default     = "24.0"
+    description = "Minimum acceptable Docker Engine server version (major.minor or major.minor.patch)"
+    validation {
+      condition     = var.min_version != ""
+      error_message = "min_version must not be empty"
+    }
+  }
+
+  # ------------------------------------------------------- daemon.json policy
+  variable "log_driver" {
+    type        = "string"
+    default     = "json-file"
+    description = "Logging driver daemon.json must select (json-file, local, journald, syslog, ...)"
+    validation {
+      condition     = var.log_driver != ""
+      error_message = "log_driver must not be empty"
+    }
+  }
+  variable "userns_remap_required" {
+    type        = "bool"
+    default     = false
+    description = "Require user namespace remapping (userns-remap) to be configured"
+  }
+  variable "userns_remap_value" {
+    type        = "string"
+    default     = "default"
+    description = "Expected value of userns-remap when userns_remap_required is true (default, or user:group)"
+  }
+  variable "seccomp_profile_required" {
+    type        = "bool"
+    default     = false
+    description = "Require a custom seccomp profile path in daemon.json instead of the built-in default"
+  }
+  variable "seccomp_profile_path" {
+    type        = "string"
+    default     = "/etc/docker/seccomp.json"
+    description = "Path of the custom seccomp profile when seccomp_profile_required is true"
+  }
+  variable "registry_mirrors_required" {
+    type        = "bool"
+    default     = false
+    description = "Require registry-mirrors to point at an internal mirror or pull-through cache"
+  }
+  variable "registry_mirror_pattern" {
+    type        = "string"
+    default     = "^https://"
+    description = "Regex every registry mirror URL must match when registry_mirrors_required is true"
+  }
+  variable "apparmor_required" {
+    type        = "bool"
+    default     = false
+    description = "Require the daemon to report AppArmor among its security options (Debian/Ubuntu hosts)"
+  }
+  variable "rootless_required" {
+    type        = "bool"
+    default     = false
+    description = "Require the daemon to run in rootless mode"
+  }
+  variable "tcp_api_allowed" {
+    type        = "bool"
+    default     = false
+    description = "Set to true when the daemon legitimately serves the API over TCP; TLS is then required and the plain port must stay closed"
+  }
+  variable "api_plain_port" {
+    type        = "number"
+    default     = 2375
+    description = "Unencrypted Docker API port that must never listen"
+    validation {
+      condition     = var.api_plain_port >= 1 && var.api_plain_port <= 65535
+      error_message = "api_plain_port must be a valid TCP port"
+    }
+  }
+  variable "api_tls_port" {
+    type        = "number"
+    default     = 2376
+    description = "TLS Docker API port; must not listen unless tcp_api_allowed is true"
+    validation {
+      condition     = var.api_tls_port >= 1 && var.api_tls_port <= 65535
+      error_message = "api_tls_port must be a valid TCP port"
+    }
+  }
+  variable "tls_ca_cert" {
+    type        = "string"
+    default     = "/etc/docker/certs.d/ca.pem"
+    description = "CA certificate the daemon verifies TCP API clients against when tcp_api_allowed is true"
+  }
+  variable "tls_server_key" {
+    type        = "string"
+    default     = "/etc/docker/certs.d/server-key.pem"
+    description = "Private key of the daemon's TCP API certificate when tcp_api_allowed is true"
+  }
+
+  # ----------------------------------------------------------- containers
+  variable "allowed_socket_containers" {
+    type        = "list(string)"
+    default     = []
+    description = "Container names allowed to bind-mount the Docker socket (e.g. traefik, watchtower); every other container mounting it fails"
+  }
+  variable "allowed_host_network_containers" {
+    type        = "list(string)"
+    default     = []
+    description = "Container names allowed to use the host network namespace"
+  }
+  variable "health_checks_required" {
+    type        = "bool"
+    default     = false
+    description = "Require every running container to define a HEALTHCHECK"
+  }
+  variable "compose_dir" {
+    type        = "string"
+    default     = "/opt/compose"
+    description = "Directory holding the compose stacks deployed on this host; checked only when present"
+    validation {
+      condition     = var.compose_dir != ""
+      error_message = "compose_dir must not be empty"
+    }
+  }
+  variable "compose_env_file" {
+    type        = "string"
+    default     = "/opt/compose/.env"
+    description = "Compose environment file that carries secrets for the stack; checked only when present"
+  }
+
+  # ---------------------------------------------------------- posture regexes
+  variable "containerd_socket" {
+    type        = "string"
+    default     = "/run/containerd/containerd.sock"
+    description = "Path of the containerd unix socket (audited for changes)"
+  }
+  variable "sensitive_host_dirs_pattern" {
+    type        = "string"
+    default     = "^/(|etc|boot|dev|lib|lib64|proc|sys|usr|var/lib/docker)$"
+    description = "Regex of host paths no container may bind-mount as a mount source"
+  }
+  variable "restart_policy_pattern" {
+    type        = "string"
+    default     = "^(always|unless-stopped|on-failure)$"
+    description = "Regex every running container's restart policy must match"
+  }
+}

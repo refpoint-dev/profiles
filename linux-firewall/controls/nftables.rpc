@@ -1,0 +1,344 @@
+# nftables used directly (not through ufw or firewalld). Every control is
+# gated on the nftables package or service.
+
+control "fw-nft-01" {
+  title       = "nftables service is running and enabled"
+  description = "The nftables unit loads the persistent ruleset at boot. When it is disabled the host comes up with an empty ruleset and accepts everything until someone loads the rules by hand."
+  remediation = "Run 'systemctl enable --now ${var.nftables_service}'."
+  impact      = 1.0
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "critical"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "nftables"
+    installed = true
+  }
+
+  check "service" "service" {
+    name    = var.nftables_service
+    running = true
+    enabled = true
+  }
+}
+
+control "fw-nft-02" {
+  title       = "Persistent nftables ruleset file exists and is protected"
+  description = "The ruleset the service loads at boot must exist, be root-owned, not be writable by others, and actually define a table. An empty or missing file yields an empty ruleset after reboot."
+  remediation = "Save the running ruleset with 'nft list ruleset > ${var.nftables_conf}', 'chown root:root' and 'chmod 0755' (or 0644) the file, and make sure it begins with 'flush ruleset'."
+  impact      = 0.8
+  tags = {
+    app      = "linux-firewall"
+    category = "filesystem"
+    severity = "high"
+    nist     = "SC-7,CM-6,AC-6"
+    iso27001 = "A.8.20,A.8.9,A.8.2"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.9, A.8.2"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "nftables"
+    installed = true
+  }
+
+  check "ruleset-file" "file" {
+    path        = var.nftables_conf
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0755"
+    content_match {
+      pattern = "^\\s*table\\s+(inet|ip|ip6)\\s+\\S+"
+      mode    = "regex"
+    }
+  }
+
+  check "flush-first" "file" {
+    path = var.nftables_conf
+    content_match {
+      pattern = "^\\s*flush ruleset"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-nft-03" {
+  title       = "nftables input base chain has policy drop"
+  description = "The running ruleset must contain a filter base chain hooked on input with policy drop. Without a drop policy every port that no rule explicitly rejects is open."
+  remediation = "Define the base chain as 'chain input { type filter hook input priority 0; policy drop; }' and reload the ruleset."
+  impact      = 1.0
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "critical"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "nftables"
+    installed = true
+  }
+
+  check "input-policy-drop" "command" {
+    cmd         = "nft list ruleset"
+    exit_status = 0
+    stdout_match {
+      pattern = "type filter hook input priority .*; policy drop;"
+      mode    = "regex"
+    }
+  }
+
+  check "no-input-policy-accept" "command" {
+    cmd         = "nft list ruleset"
+    exit_status = 0
+    stdout_match {
+      pattern = "type filter hook input priority .*; policy accept;"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "fw-nft-04" {
+  title       = "nftables accepts loopback traffic"
+  description = "Traffic on the lo interface must be accepted before the drop policy applies. The ruleset is inspected for an 'iif lo accept' (or iifname) rule."
+  remediation = "Add 'iif lo accept' as the first rule in the input chain, and 'ip saddr 127.0.0.0/8 counter drop' for non-loopback interfaces."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "medium"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "nftables"
+    installed = true
+  }
+
+  check "loopback-accept" "command" {
+    cmd         = "nft list ruleset"
+    exit_status = 0
+    stdout_match {
+      pattern = "^\\s*iif(name)?\\s+\"?lo\"?\\s+.*accept"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-nft-05" {
+  title       = "nftables accepts established and related connections"
+  description = "Reply traffic for connections the host initiated must be accepted via conntrack state; otherwise outbound sessions (updates, DNS, monitoring) break under a drop policy."
+  remediation = "Add 'ct state established,related accept' to the input chain."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "availability"
+    severity = "medium"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "nftables"
+    installed = true
+  }
+
+  check "established-related" "command" {
+    cmd         = "nft list ruleset"
+    exit_status = 0
+    stdout_match {
+      pattern = "ct state\\s+\\{?\\s*(established|related)\\s*,\\s*(established|related)\\s*\\}?\\s+.*accept"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-nft-06" {
+  title       = "nftables drops invalid packets"
+  description = "Packets that conntrack classifies as invalid (malformed, out-of-window) should be dropped early rather than evaluated against service rules."
+  remediation = "Add 'ct state invalid drop' near the top of the input chain."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "medium"
+    nist     = "SC-7,SC-5"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "nftables wiki: Simple ruleset for a server"
+    url   = "https://wiki.nftables.org/wiki-nftables/index.php/Simple_ruleset_for_a_server"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, SC-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "nftables"
+    installed = true
+  }
+
+  check "invalid-drop" "command" {
+    cmd         = "nft list ruleset"
+    exit_status = 0
+    stdout_match {
+      pattern = "ct state\\s+invalid\\s+.*drop"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-nft-07" {
+  title       = "nftables forward chain drops when forwarding is disabled"
+  description = "On hosts that are not routers (var.ip_forward = 0) the forward base chain must also carry policy drop, so an accidental sysctl change does not turn the host into an open router."
+  remediation = "Add 'chain forward { type filter hook forward priority 0; policy drop; }' to the filter table."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "medium"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test \"${var.ip_forward}\" = 0 && nft list tables"
+    exit_status = 0
+  }
+
+  check "forward-policy-drop" "command" {
+    cmd         = "nft list ruleset"
+    exit_status = 0
+    stdout_match {
+      pattern = "type filter hook forward priority .*; policy drop;"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-nft-08" {
+  title       = "Legacy iptables persistence is absent on nftables hosts"
+  description = "iptables-persistent / netfilter-persistent restore a separate iptables ruleset at boot and race with the nftables service for control of the packet filter. On a host whose backend is nftables they must not be installed."
+  remediation = "Remove the packages: 'apt-get purge iptables-persistent netfilter-persistent'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "CM-7"
+    iso27001 = "A.8.9,A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.nftables_service
+    running = true
+  }
+
+  check "iptables-persistent-absent" "package" {
+    name      = "iptables-persistent"
+    installed = false
+  }
+
+  check "netfilter-persistent-absent" "package" {
+    name      = "netfilter-persistent"
+    installed = false
+  }
+}
+
+control "fw-nft-09" {
+  title       = "nftables accepts SSH on the expected port"
+  description = "Under a drop policy the SSH port must be explicitly accepted or the next reload locks administrators out. The running ruleset is inspected for an accept rule whose tcp dport is var.ssh_port, a set containing it, or the 'ssh' service name."
+  remediation = "Add 'tcp dport ${var.ssh_port} accept' to the input chain and persist it in ${var.nftables_conf}."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "availability"
+    severity = "medium"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20,A.8.9"
+  }
+  ref {
+    title = "nftables wiki: Simple ruleset for a server"
+    url   = "https://wiki.nftables.org/wiki-nftables/index.php/Simple_ruleset_for_a_server"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.nftables_service
+    running = true
+  }
+
+  check "ssh-accept" "command" {
+    cmd         = "nft list ruleset"
+    exit_status = 0
+    stdout_match {
+      pattern = "tcp dport\\s+(\\{[^}]*\\b${var.ssh_port}\\b[^}]*\\}|${var.ssh_port}|ssh)\\b.*accept"
+      mode    = "regex"
+    }
+  }
+}

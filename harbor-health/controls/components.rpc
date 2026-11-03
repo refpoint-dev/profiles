@@ -1,0 +1,510 @@
+# One control per component: running state and image reference (repo prefix and tag).
+# Mandatory components are gated on the proxy container existing; optional
+# ones on their own container existing, except Trivy which is required
+# unless require_trivy is false.
+
+control "harbor-health-01" {
+  title       = "Proxy (nginx) container is running and uses the expected goharbor image"
+  description = "The ${var.proxy_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.proxy_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.proxy_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-02" {
+  title       = "Core container is running and uses the expected goharbor image"
+  description = "The ${var.core_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.core_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.core_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-03" {
+  title       = "Portal container is running and uses the expected goharbor image"
+  description = "The ${var.portal_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.portal_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.portal_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-04" {
+  title       = "Job service container is running and uses the expected goharbor image"
+  description = "The ${var.jobservice_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.jobservice_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.jobservice_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-05" {
+  title       = "Registry container is running and uses the expected goharbor image"
+  description = "The ${var.registry_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.registry_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.registry_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-06" {
+  title       = "Registry controller container is running and uses the expected goharbor image"
+  description = "The ${var.registryctl_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.registryctl_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.registryctl_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-07" {
+  title       = "Database container is running and uses the expected goharbor image"
+  description = "The ${var.db_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version. Skipped when the container is absent (external database)."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.db_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.db_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.db_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-08" {
+  title       = "Redis container is running and uses the expected goharbor image"
+  description = "The ${var.redis_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version. Skipped when the container is absent (external redis)."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.redis_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.redis_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.redis_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-09" {
+  title       = "Log collector container is running and uses the expected goharbor image"
+  description = "The ${var.log_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version. Skipped when the container is absent (external log endpoint)."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.log_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.log_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.log_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-10" {
+  title       = "Trivy adapter container is running and uses the expected goharbor image"
+  description = "The ${var.trivy_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version. Fails when the container is missing unless require_trivy is false."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.proxy_container}' && { printf '%s' '${var.require_trivy}' | grep -qx true || docker ps -a --format '{{.Names}}' | grep -qx '${var.trivy_container}'; }"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.trivy_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.trivy_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-health-11" {
+  title       = "Exporter container is running and uses the expected goharbor image"
+  description = "The ${var.exporter_container} container must be in the running state and its image must come from ${var.image_repo_prefix} and carry the tag given by harbor_version. Skipped when the container is absent (metrics disabled)."
+  remediation = "docker compose up -d from the Harbor installation directory; if the tag differs from harbor_version, either upgrade from the matching release bundle or run with --var harbor_version=<deployed tag>."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4,CM-2"
+    iso27001 = "A.8.14,A.8.16,A.8.9"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4, CM-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.exporter_container}'"
+    exit_status = 0
+  }
+  check "running" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.exporter_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "image" "command" {
+    cmd         = "docker inspect -f '{{.Config.Image}}' '${var.exporter_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.image_repo_prefix}[^:]+:${var.harbor_version}$"
+      mode    = "regex"
+    }
+  }
+}

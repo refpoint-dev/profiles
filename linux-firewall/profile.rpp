@@ -1,0 +1,237 @@
+profile "linux-firewall" {
+  title       = "Linux Host Firewall"
+  description = "Host firewall posture for Linux servers running ufw, firewalld or nftables. Backend-specific controls are gated on the backend being installed, so a host with any one backend passes its controls and skips the other two. Backend-independent controls cover the effective policy, kernel network hardening, listening services and optional fail2ban."
+  version     = "1.0.0"
+  author      = "refpoint"
+  platform    = ["linux"]
+
+  # Every executable the command checks run, including those after pipes and
+  # the argument of the test/wrapper commands. The operator's own allow list
+  # remains the ceiling.
+  allowed_commands = [
+    "ufw", "firewall-cmd", "nft", "ss", "systemctl", "grep", "test",
+    "fail2ban-client",
+  ]
+
+  variable "expected_backend" {
+    type        = "string"
+    default     = ""
+    description = "Firewall backend the host is expected to run (ufw, firewalld or nftables). Leave empty to accept whichever backend is active."
+    validation {
+      condition     = contains(["", "ufw", "firewalld", "nftables"], var.expected_backend)
+      error_message = "expected_backend must be empty or one of ufw, firewalld, nftables"
+    }
+  }
+
+  variable "ssh_port" {
+    type        = "number"
+    default     = 22
+    description = "TCP port the SSH daemon listens on; the port that must be allowed with rate limiting"
+    validation {
+      condition     = var.ssh_port >= 1 && var.ssh_port <= 65535
+      error_message = "ssh_port must be a valid TCP port (1-65535)"
+    }
+  }
+
+  variable "sshd_process" {
+    type        = "string"
+    default     = "sshd"
+    description = "Process name of the SSH daemon that must own the SSH listener"
+  }
+
+  variable "default_outgoing" {
+    type        = "string"
+    default     = "allow"
+    description = "Expected default policy for outgoing traffic (allow, deny or reject)"
+    validation {
+      condition     = contains(["allow", "deny", "reject"], var.default_outgoing)
+      error_message = "default_outgoing must be one of allow, deny, reject"
+    }
+  }
+
+  variable "ip_forward" {
+    type        = "string"
+    default     = "0"
+    description = "Expected value of net.ipv4.ip_forward; set to \"1\" on routers, container hosts and hypervisors"
+    validation {
+      condition     = contains(["0", "1"], var.ip_forward)
+      error_message = "ip_forward must be \"0\" or \"1\""
+    }
+  }
+
+  variable "ipv6_enabled" {
+    type        = "bool"
+    default     = true
+    description = "Whether IPv6 is in use on the host; gates the IPv6 sysctl and ufw IPV6=yes controls"
+  }
+
+  variable "forbidden_ports" {
+    type        = "list(string)"
+    default     = ["23", "111", "135", "139", "445", "2049", "6000"]
+    description = "TCP ports that must never be listening (telnet, portmapper, SMB/NetBIOS, NFS, X11)"
+    validation {
+      condition     = length(var.forbidden_ports) > 0
+      error_message = "forbidden_ports must list at least one port"
+    }
+  }
+
+  # ---- ufw -----------------------------------------------------------------
+
+  variable "ufw_conf" {
+    type        = "string"
+    default     = "/etc/ufw/ufw.conf"
+    description = "Path of the ufw state file holding ENABLED= and LOGLEVEL="
+    validation {
+      condition     = var.ufw_conf != ""
+      error_message = "ufw_conf must not be empty"
+    }
+  }
+
+  variable "ufw_defaults" {
+    type        = "string"
+    default     = "/etc/default/ufw"
+    description = "Path of the ufw defaults file holding IPV6= and DEFAULT_*_POLICY="
+    validation {
+      condition     = var.ufw_defaults != ""
+      error_message = "ufw_defaults must not be empty"
+    }
+  }
+
+  variable "ufw_before_rules" {
+    type        = "string"
+    default     = "/etc/ufw/before.rules"
+    description = "Path of the ufw before.rules file that carries the loopback rules"
+    validation {
+      condition     = var.ufw_before_rules != ""
+      error_message = "ufw_before_rules must not be empty"
+    }
+  }
+
+  variable "ufw_rules_dir" {
+    type        = "string"
+    default     = "/etc/ufw"
+    description = "Directory holding the generated ufw rule files (user.rules, user6.rules, before.rules)"
+    validation {
+      condition     = var.ufw_rules_dir != ""
+      error_message = "ufw_rules_dir must not be empty"
+    }
+  }
+
+  variable "ufw_service" {
+    type        = "string"
+    default     = "ufw"
+    description = "systemd unit name of ufw"
+  }
+
+  # ---- firewalld -----------------------------------------------------------
+
+  variable "firewalld_service" {
+    type        = "string"
+    default     = "firewalld"
+    description = "systemd unit name of firewalld"
+  }
+
+  variable "firewalld_conf" {
+    type        = "string"
+    default     = "/etc/firewalld/firewalld.conf"
+    description = "Path of the firewalld main configuration file"
+    validation {
+      condition     = var.firewalld_conf != ""
+      error_message = "firewalld_conf must not be empty"
+    }
+  }
+
+  variable "default_zone" {
+    type        = "string"
+    default     = "public"
+    description = "firewalld zone expected to be the default zone and to carry the SSH allowance"
+    validation {
+      condition     = var.default_zone != ""
+      error_message = "default_zone must not be empty"
+    }
+  }
+
+  variable "zone_target" {
+    type        = "string"
+    default     = "default"
+    description = "Expected target of the default zone (default, DROP, ACCEPT or %%REJECT%%)"
+    validation {
+      condition     = contains(["default", "DROP", "ACCEPT", "%%REJECT%%"], var.zone_target)
+      error_message = "zone_target must be one of default, DROP, ACCEPT, %%REJECT%%"
+    }
+  }
+
+  variable "allow_dhcpv6_client" {
+    type        = "bool"
+    default     = false
+    description = "Set to true when the dhcpv6-client service is legitimately needed in the default zone"
+  }
+
+  variable "allow_cockpit" {
+    type        = "bool"
+    default     = false
+    description = "Set to true when the cockpit web console is legitimately exposed in the default zone"
+  }
+
+  # ---- nftables ------------------------------------------------------------
+
+  variable "nftables_service" {
+    type        = "string"
+    default     = "nftables"
+    description = "systemd unit name of nftables"
+  }
+
+  variable "nftables_conf" {
+    type        = "string"
+    default     = "/etc/nftables.conf"
+    description = "Path of the persistent nftables ruleset loaded at boot"
+    validation {
+      condition     = var.nftables_conf != ""
+      error_message = "nftables_conf must not be empty"
+    }
+  }
+
+  # ---- fail2ban ------------------------------------------------------------
+
+  variable "fail2ban_service" {
+    type        = "string"
+    default     = "fail2ban"
+    description = "systemd unit name of fail2ban"
+  }
+
+  variable "fail2ban_jail_local" {
+    type        = "string"
+    default     = "/etc/fail2ban/jail.local"
+    description = "Path of the local fail2ban jail overrides file"
+    validation {
+      condition     = var.fail2ban_jail_local != ""
+      error_message = "fail2ban_jail_local must not be empty"
+    }
+  }
+
+  variable "fail2ban_ssh_jail" {
+    type        = "string"
+    default     = "sshd"
+    description = "Name of the fail2ban jail that protects SSH"
+  }
+
+  variable "fail2ban_max_retry" {
+    type        = "number"
+    default     = 5
+    description = "Highest acceptable maxretry for the SSH jail; the effective value must not exceed it"
+    validation {
+      condition     = var.fail2ban_max_retry >= 1 && var.fail2ban_max_retry <= 20
+      error_message = "fail2ban_max_retry must be between 1 and 20"
+    }
+  }
+
+  variable "fail2ban_min_bantime" {
+    type        = "number"
+    default     = 600
+    description = "Minimum acceptable bantime in seconds for the SSH jail"
+    validation {
+      condition     = var.fail2ban_min_bantime >= 60
+      error_message = "fail2ban_min_bantime must be at least 60 seconds"
+    }
+  }
+}

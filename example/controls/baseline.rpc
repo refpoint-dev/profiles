@@ -1,0 +1,25 @@
+control "example-01" {
+  title  = "Hosts file is present"
+  impact = 0.5
+  tags = {
+    category = "example"
+  }
+
+  check "hosts-file" "file" {
+    path  = "/etc/hosts"
+    exists = true
+  }
+}
+
+control "example-02" {
+  title  = "Kernel name is reported"
+  impact = 0.3
+  tags = {
+    category = "example"
+  }
+
+  check "uname" "command" {
+    cmd         = "uname -s"
+    exit_status = 0
+  }
+}

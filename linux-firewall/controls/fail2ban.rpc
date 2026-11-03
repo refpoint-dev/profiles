@@ -1,0 +1,163 @@
+# fail2ban is optional; every control skips when the package is absent.
+
+control "fw-f2b-01" {
+  title       = "fail2ban is running and enabled"
+  description = "When fail2ban is installed it must actually be running and enabled at boot, otherwise the SSH brute-force protection it is expected to provide is absent."
+  remediation = "Run 'systemctl enable --now ${var.fail2ban_service}' and check 'fail2ban-client status'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "auth"
+    severity = "medium"
+    nist     = "AC-7,SI-4"
+    iso27001 = "A.8.5,A.8.16"
+  }
+  ref {
+    title = "fail2ban documentation"
+    url   = "https://github.com/fail2ban/fail2ban/wiki"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-7, SI-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.5, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "fail2ban"
+    installed = true
+  }
+
+  check "service" "service" {
+    name    = var.fail2ban_service
+    running = true
+    enabled = true
+  }
+
+  check "server-answers" "command" {
+    cmd         = "fail2ban-client ping"
+    exit_status = 0
+    stdout_match {
+      pattern = "pong"
+      mode    = "line"
+    }
+  }
+}
+
+control "fw-f2b-02" {
+  title       = "fail2ban has a local jail configuration"
+  description = "Site settings belong in jail.local, never in the packaged jail.conf which upgrades overwrite. The file must exist, be root-owned and not be world-writable."
+  remediation = "Create ${var.fail2ban_jail_local} with the local overrides, owned by root with mode 0644 or stricter."
+  impact      = 0.4
+  tags = {
+    app      = "linux-firewall"
+    category = "hardening"
+    severity = "low"
+    nist     = "CM-6"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "fail2ban"
+    installed = true
+  }
+
+  check "jail-local" "file" {
+    path        = var.fail2ban_jail_local
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0644"
+  }
+}
+
+control "fw-f2b-03" {
+  title       = "fail2ban SSH jail is enabled"
+  description = "The jail named by var.fail2ban_ssh_jail must be active in the running server; a jail defined in jail.local but not enabled protects nothing."
+  remediation = "Add 'enabled = true' under the [${var.fail2ban_ssh_jail}] section of ${var.fail2ban_jail_local} and restart fail2ban."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "auth"
+    severity = "medium"
+    nist     = "AC-7,SI-4"
+    iso27001 = "A.8.5,A.8.16"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-7, SI-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.5, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.fail2ban_service
+    running = true
+  }
+
+  check "ssh-jail-active" "command" {
+    cmd         = "fail2ban-client status ${var.fail2ban_ssh_jail}"
+    exit_status = 0
+    stdout_match {
+      pattern = "Status for the jail: ${var.fail2ban_ssh_jail}"
+      mode    = "line"
+    }
+  }
+
+  check "ssh-jail-listed" "command" {
+    cmd         = "fail2ban-client status"
+    exit_status = 0
+    stdout_match {
+      pattern = "Jail list:.*\\b${var.fail2ban_ssh_jail}\\b"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-f2b-04" {
+  title       = "fail2ban SSH jail thresholds are strict enough"
+  description = "The effective maxretry of the SSH jail must not exceed var.fail2ban_max_retry and the effective bantime must be at least var.fail2ban_min_bantime seconds; otherwise the jail tolerates more password guesses than the policy allows or releases offenders too quickly. Values are read from the running server, so overrides in jail.d are honoured."
+  remediation = "Set 'maxretry = ${var.fail2ban_max_retry}' (or lower) and 'bantime = ${var.fail2ban_min_bantime}' (or higher) under [${var.fail2ban_ssh_jail}] in ${var.fail2ban_jail_local} and restart fail2ban."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "auth"
+    severity = "medium"
+    nist     = "AC-7"
+    iso27001 = "A.8.5"
+  }
+  ref {
+    title = "fail2ban manual: jail.conf"
+    url   = "https://manpages.debian.org/testing/fail2ban/jail.conf.5.en.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.5"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.fail2ban_service
+    running = true
+  }
+
+  check "maxretry" "command" {
+    cmd         = "test \"$(fail2ban-client get ${var.fail2ban_ssh_jail} maxretry)\" -le ${var.fail2ban_max_retry}"
+    exit_status = 0
+  }
+
+  check "bantime" "command" {
+    cmd         = "test \"$(fail2ban-client get ${var.fail2ban_ssh_jail} bantime)\" -ge ${var.fail2ban_min_bantime}"
+    exit_status = 0
+  }
+}

@@ -1,0 +1,227 @@
+# System logging, log rotation, time synchronisation and mandatory access
+# control.
+
+control "base-log-01" {
+  title       = "A persistent system logger is active"
+  description = "Log lines must survive a reboot. Either rsyslog is running, or journald persists its journal to disk (Storage=persistent in its configuration, or the persistent journal directory exists so Storage=auto lands on disk)."
+  remediation = "Either 'systemctl enable --now ${var.rsyslog_service}', or set 'Storage=persistent' in ${var.journald_conf} and 'mkdir -p ${var.journal_dir}; systemctl restart systemd-journald'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "high"
+    nist     = "AU-4,AU-9,AU-12"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-4, AU-9, AU-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "persistent-logger" {
+    check "rsyslog" "service" {
+      name    = var.rsyslog_service
+      running = true
+      enabled = true
+    }
+    check "journald-persistent" "file" {
+      path = var.journald_conf
+      content_match {
+        pattern = "^\\s*Storage\\s*=\\s*persistent\\s*$"
+        mode    = "regex"
+      }
+    }
+    check "journald-persistent-dropin" "folder_contents" {
+      path = var.journald_conf_dir
+      glob = "*.conf"
+      content_match {
+        pattern = "^\\s*Storage\\s*=\\s*persistent\\s*$"
+        mode    = "regex"
+      }
+    }
+    check "journal-dir" "directory" {
+      path   = var.journal_dir
+      exists = true
+      owner  = "root"
+    }
+  }
+}
+
+control "base-log-02" {
+  title       = "journald stores its journal persistently and compresses it"
+  description = "Storage=persistent keeps the journal in /var/log/journal across reboots instead of the volatile /run; Compress=yes keeps the persistent journal from consuming the log filesystem. Either the main file or a drop-in may set each."
+  remediation = "Set 'Storage=persistent' and 'Compress=yes' under [Journal] in ${var.journald_conf} (or a file in ${var.journald_conf_dir}) and restart systemd-journald."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-4,AU-9"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "journald.conf manual page"
+    url   = "https://www.freedesktop.org/software/systemd/man/latest/journald.conf.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-4, AU-9"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "storage-persistent" {
+    check "main" "file" {
+      path = var.journald_conf
+      content_match {
+        pattern = "^\\s*Storage\\s*=\\s*persistent\\s*$"
+        mode    = "regex"
+      }
+    }
+    check "dropin" "folder_contents" {
+      path = var.journald_conf_dir
+      glob = "*.conf"
+      content_match {
+        pattern = "^\\s*Storage\\s*=\\s*persistent\\s*$"
+        mode    = "regex"
+      }
+    }
+  }
+
+  any_of "compress-yes" {
+    check "main" "file" {
+      path = var.journald_conf
+      content_match {
+        pattern = "^\\s*Compress\\s*=\\s*(yes|true|1)\\s*$"
+        mode    = "regex"
+      }
+    }
+    check "dropin" "folder_contents" {
+      path = var.journald_conf_dir
+      glob = "*.conf"
+      content_match {
+        pattern = "^\\s*Compress\\s*=\\s*(yes|true|1)\\s*$"
+        mode    = "regex"
+      }
+    }
+  }
+}
+
+control "base-log-03" {
+  title       = "logrotate is installed and configured"
+  description = "Unrotated logs eventually fill the log filesystem and stop logging altogether. logrotate must be installed with a root-owned main configuration."
+  remediation = "Install logrotate and ensure ${var.logrotate_conf} exists, owned by root and not world-writable."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "low"
+    nist     = "AU-4,AU-5"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-4, AU-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "package" "package" {
+    name      = "logrotate"
+    installed = true
+  }
+
+  check "config" "file" {
+    path        = var.logrotate_conf
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0644"
+  }
+}
+
+control "base-time-01" {
+  title       = "System time is synchronised"
+  description = "Accurate time is a prerequisite for log correlation, certificate validation and Kerberos. A time synchronisation daemon (chrony or systemd-timesyncd) must be running and the clock must currently be synchronised within var.max_time_offset_ms."
+  remediation = "Install and enable chrony ('systemctl enable --now ${var.chrony_service_rhel}' or '${var.chrony_service_debian}') or 'systemctl enable --now ${var.timesyncd_service}', and configure at least one reachable time source."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "high"
+    nist     = "AU-8,SC-45"
+    iso27001 = "A.8.17"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-8, SC-45"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "synchronized" "timesync" {
+    synchronized  = true
+    max_offset_ms = var.max_time_offset_ms
+  }
+
+  any_of "time-daemon-running" {
+    check "chrony-debian" "service" {
+      name    = var.chrony_service_debian
+      running = true
+      enabled = true
+    }
+    check "chrony-rhel" "service" {
+      name    = var.chrony_service_rhel
+      running = true
+      enabled = true
+    }
+    check "timesyncd" "service" {
+      name    = var.timesyncd_service
+      running = true
+      enabled = true
+    }
+  }
+}
+
+control "base-mac-01" {
+  title       = "A mandatory access control system is enforcing"
+  description = "SELinux in enforcing mode or AppArmor with profiles loaded confines services beyond what discretionary permissions provide, limiting what a compromised daemon can reach. One of the two must be active."
+  remediation = "RHEL-family: set SELINUX=enforcing in /etc/selinux/config and reboot. Debian-family: 'apt-get install apparmor apparmor-utils', ensure apparmor=1 security=apparmor on the kernel command line, and 'aa-enforce /etc/apparmor.d/*'."
+  impact      = 0.8
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "high"
+    nist     = "AC-3,AC-6,SC-39"
+    iso27001 = "A.8.3,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6, SC-39"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "mac-active" {
+    check "selinux" "mac" {
+      system    = "selinux"
+      enabled   = true
+      enforcing = true
+    }
+    check "apparmor" "mac" {
+      system  = "apparmor"
+      enabled = true
+    }
+  }
+}

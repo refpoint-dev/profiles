@@ -1,0 +1,315 @@
+# Account databases, password ageing, root account and default umask.
+
+control "base-acct-01" {
+  title       = "Account database has no duplicate uids and only root has uid 0"
+  description = "Two accounts sharing a uid are indistinguishable to the kernel, so file ownership and audit trails become ambiguous. A second uid-0 account is a hidden root login."
+  remediation = "Inspect ${var.passwd_file} for duplicate third fields and for uid 0 entries other than ${var.root_user}; reassign uids with usermod -u or delete the account."
+  impact      = 0.9
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "high"
+    nist     = "AC-2,IA-4"
+    iso27001 = "A.5.16,A.8.2"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-2, IA-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.16, A.8.2"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "uids" "user_db" {
+    no_duplicate_uids    = true
+    no_uid0_besides_root = true
+  }
+}
+
+control "base-acct-02" {
+  title       = "No account has an empty password"
+  description = "An empty password field in the shadow file lets anyone log in as that account with no credential at all. Every account must either have a hash or be locked."
+  remediation = "Lock the affected accounts: 'passwd -l <user>', or set a password."
+  impact      = 1.0
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "critical"
+    nist     = "IA-5"
+    iso27001 = "A.5.17"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "no-empty-passwords" "user_db" {
+    no_empty_passwords = true
+  }
+}
+
+control "base-acct-03" {
+  title       = "Existing accounts have password ageing applied"
+  description = "login.defs only affects accounts created afterwards; accounts that already exist must have a maximum age of at most var.pass_max_days and a minimum age of at least var.pass_min_days in the shadow file."
+  remediation = "For each account with a password: 'chage --maxdays ${var.pass_max_days} --mindays ${var.pass_min_days} <user>'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "medium"
+    nist     = "IA-5"
+    iso27001 = "A.5.17"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "password-ages" "user_db" {
+    max_password_age_days = var.pass_max_days
+    min_password_age_days = var.pass_min_days
+  }
+}
+
+control "base-acct-04" {
+  title       = "login.defs enforces password ageing for new accounts"
+  description = "PASS_MAX_DAYS, PASS_MIN_DAYS and PASS_WARN_AGE in login.defs set the defaults applied by useradd. Each must be set explicitly and within the thresholds var.pass_max_days, var.pass_min_days and var.pass_warn_age."
+  remediation = "Set 'PASS_MAX_DAYS ${var.pass_max_days}', 'PASS_MIN_DAYS ${var.pass_min_days}' and 'PASS_WARN_AGE ${var.pass_warn_age}' in ${var.login_defs}."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "medium"
+    nist     = "IA-5"
+    iso27001 = "A.5.17"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "pass-max-days-set" "file" {
+    path        = var.login_defs
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0644"
+    content_match {
+      pattern = "^\\s*PASS_MAX_DAYS\\s+[1-9][0-9]*\\s*$"
+      mode    = "regex"
+    }
+  }
+
+  check "pass-max-days-threshold" "command" {
+    cmd         = "test \"$(awk '/^[[:space:]]*PASS_MAX_DAYS[[:space:]]/ {v=$2} END {print v+0}' ${var.login_defs})\" -le ${var.pass_max_days}"
+    exit_status = 0
+  }
+
+  check "pass-min-days-set" "file" {
+    path = var.login_defs
+    content_match {
+      pattern = "^\\s*PASS_MIN_DAYS\\s+[0-9]+\\s*$"
+      mode    = "regex"
+    }
+  }
+
+  check "pass-min-days-threshold" "command" {
+    cmd         = "test \"$(awk '/^[[:space:]]*PASS_MIN_DAYS[[:space:]]/ {v=$2} END {print v+0}' ${var.login_defs})\" -ge ${var.pass_min_days}"
+    exit_status = 0
+  }
+
+  check "pass-warn-age-set" "file" {
+    path = var.login_defs
+    content_match {
+      pattern = "^\\s*PASS_WARN_AGE\\s+[0-9]+\\s*$"
+      mode    = "regex"
+    }
+  }
+
+  check "pass-warn-age-threshold" "command" {
+    cmd         = "test \"$(awk '/^[[:space:]]*PASS_WARN_AGE[[:space:]]/ {v=$2} END {print v+0}' ${var.login_defs})\" -ge ${var.pass_warn_age}"
+    exit_status = 0
+  }
+}
+
+control "base-acct-05" {
+  title       = "passwd and group databases are root-owned and not writable by others"
+  description = "The account and group databases are world-readable by design but must be writable only by root; a writable passwd lets any user add a uid-0 account."
+  remediation = "chown root:root ${var.passwd_file} ${var.group_file} && chmod 0644 ${var.passwd_file} ${var.group_file}"
+  impact      = 0.8
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "high"
+    nist     = "AC-3,AC-6"
+    iso27001 = "A.5.15,A.8.2"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.15, A.8.2"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "passwd" "file" {
+    path        = var.passwd_file
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+  }
+
+  check "group" "file" {
+    path        = var.group_file
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+  }
+}
+
+control "base-acct-06" {
+  title       = "shadow and gshadow databases are not readable by others"
+  description = "The shadow files hold password hashes. They must be root-owned, group root or shadow, and unreadable by others; Debian ships them 0640 root:shadow and RHEL 0000 root:root, both of which pass."
+  remediation = "chown root:root ${var.shadow_file} ${var.gshadow_file} && chmod 0640 ${var.shadow_file} ${var.gshadow_file} (or chown root:shadow on Debian-family)."
+  impact      = 0.9
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "high"
+    nist     = "AC-3,AC-6,IA-5"
+    iso27001 = "A.5.15,A.5.17,A.8.2"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6, IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.15, A.5.17, A.8.2"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "shadow" "file" {
+    path        = var.shadow_file
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0640"
+  }
+
+  check "shadow-group" "command" {
+    cmd         = "stat -c '%G' ${var.shadow_file}"
+    exit_status = 0
+    stdout_match {
+      pattern = "^(root|shadow)$"
+      mode    = "regex"
+    }
+  }
+
+  check "gshadow" "file" {
+    path        = var.gshadow_file
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0640"
+  }
+
+  check "gshadow-group" "command" {
+    cmd         = "stat -c '%G' ${var.gshadow_file}"
+    exit_status = 0
+    stdout_match {
+      pattern = "^(root|shadow)$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "base-acct-07" {
+  title       = "Root account has the expected uid, gid, shell and home"
+  description = "The superuser account must exist as uid 0 / gid 0 with the shell named by var.root_shell and its home at var.root_home; a changed shell or home is a classic persistence trick."
+  remediation = "usermod -s ${var.root_shell} -d ${var.root_home} ${var.root_user}; verify the passwd entry by hand."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "high"
+    nist     = "AC-2,AC-6"
+    iso27001 = "A.5.16,A.8.2"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-2, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.16, A.8.2"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "root" "user" {
+    name   = var.root_user
+    exists = true
+    uid    = 0
+    gid    = 0
+    shell  = var.root_shell
+    home   = var.root_home
+  }
+}
+
+control "base-acct-08" {
+  title       = "Default umask is restrictive"
+  description = "A default umask of 027 (or 077) keeps files new processes create out of reach of other users. It must be set in login.defs, /etc/profile or a profile.d fragment; any one of these satisfies the control."
+  remediation = "Set 'UMASK ${var.umask}' in ${var.login_defs} and 'umask ${var.umask}' in ${var.profile_file} or ${var.profile_dir}/umask.sh."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "medium"
+    nist     = "AC-3,AC-6"
+    iso27001 = "A.5.15,A.8.3"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.15, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "umask-configured" {
+    check "login-defs" "file" {
+      path = var.login_defs
+      content_match {
+        pattern = "^\\s*UMASK\\s+0?${var.umask}\\s*$"
+        mode    = "regex"
+      }
+    }
+    check "profile" "file" {
+      path = var.profile_file
+      content_match {
+        pattern = "^\\s*umask\\s+0?${var.umask}\\b"
+        mode    = "regex"
+      }
+    }
+    check "profile-d" "folder_contents" {
+      path = var.profile_dir
+      glob = "*.sh"
+      content_match {
+        pattern = "^\\s*umask\\s+0?${var.umask}\\b"
+        mode    = "regex"
+      }
+    }
+  }
+}

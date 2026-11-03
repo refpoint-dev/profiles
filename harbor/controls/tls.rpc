@@ -1,0 +1,271 @@
+# Server TLS material and the generated proxy configuration.
+
+control "harbor-tls-01" {
+  title       = "harbor.yml references the configured certificate and key"
+  description = "The https.certificate and https.private_key paths in harbor.yml must be the files this profile inspects, otherwise the certificate and key controls describe material the proxy does not serve. Skipped when the certificate file does not exist or allow_http_only is true."
+  remediation = "Set certificate: ${var.tls_cert_file} and private_key: ${var.tls_key_file} under https in ${var.config_file}, or run with --var tls_cert_file/--var tls_key_file matching the file."
+  impact      = 0.4
+  tags = {
+    app      = "harbor"
+    category = "tls"
+    severity = "low"
+    nist     = "CM-6,SC-12"
+    iso27001 = "A.8.24"
+  }
+  ref {
+    title = "Harbor: Configure HTTPS Access to Harbor"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-https/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, SC-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.allow_http_only}' | grep -qx false && test -f '${var.tls_cert_file}' && test -f '${var.config_file}'"
+    exit_status = 0
+  }
+  check "paths" "file" {
+    path = var.config_file
+    content_match {
+      pattern = "^\\s+certificate:\\s*['\"]?${var.tls_cert_file}['\"]?\\s*$"
+      mode    = "regex"
+    }
+    content_match {
+      pattern = "^\\s+private_key:\\s*['\"]?${var.tls_key_file}['\"]?\\s*$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-tls-02" {
+  title       = "Server private key is readable by root only"
+  description = "The private key referenced by https.private_key is copied into the proxy configuration by prepare; the source on the host must stay root-owned and mode 0600. Skipped when the key does not exist."
+  remediation = "chown root:root ${var.tls_key_file} && chmod 0600 ${var.tls_key_file}"
+  impact      = 0.9
+  tags = {
+    app      = "harbor"
+    category = "secrets"
+    severity = "high"
+    nist     = "SC-12,IA-5"
+    iso27001 = "A.8.24,A.5.17"
+  }
+  ref {
+    title = "Harbor: Configure HTTPS Access to Harbor"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-https/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-12, IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.tls_key_file
+    exists = true
+  }
+  check "key-perms" "file" {
+    path        = var.tls_key_file
+    owner       = "root"
+    permissions = "<= 0600"
+  }
+}
+
+control "harbor-tls-03" {
+  title       = "Copy of the private key inside the proxy configuration is private"
+  description = "prepare copies the server key to common/config/nginx/cert/server.key, which is bind-mounted into the proxy. That copy must not be group- or world-readable. Skipped when the copy does not exist."
+  remediation = "chmod 0600 ${var.harbor_dir}/common/config/nginx/cert/server.key, or re-run ./prepare which regenerates the directory with restrictive modes."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "secrets"
+    severity = "high"
+    nist     = "SC-12,AC-3"
+    iso27001 = "A.8.24,A.8.3"
+  }
+  ref {
+    title = "Harbor: Configure HTTPS Access to Harbor"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-https/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-12, AC-3"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = "${var.harbor_dir}/common/config/nginx/cert/server.key"
+    exists = true
+  }
+  check "key-copy-perms" "file" {
+    path        = "${var.harbor_dir}/common/config/nginx/cert/server.key"
+    permissions = "<= 0600"
+  }
+}
+
+control "harbor-tls-04" {
+  title       = "Server certificate is valid and uses a strong key"
+  description = "The certificate the proxy presents must not be close to expiry and must carry at least a 2048-bit RSA or a 256-bit EC key; docker clients refuse expired registries outright. Skipped when the certificate file does not exist."
+  remediation = "Renew the certificate at ${var.tls_cert_file}, run ./prepare and recreate the proxy container."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "tls"
+    severity = "high"
+    nist     = "SC-12,SC-13"
+    iso27001 = "A.8.24"
+  }
+  ref {
+    title = "Harbor: Configure HTTPS Access to Harbor"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-https/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-12, SC-13"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.tls_cert_file
+    exists = true
+  }
+  check "server-cert" "x509_certificate" {
+    path               = var.tls_cert_file
+    expiry_within_days = var.cert_expiry_days
+    min_key_bits       = 2048
+  }
+}
+
+control "harbor-tls-05" {
+  title       = "Generated proxy configuration allows only TLS 1.2 and 1.3"
+  description = "The nginx configuration prepare renders must restrict ssl_protocols to TLSv1.2 and TLSv1.3; SSLv3, TLS 1.0 and TLS 1.1 have known downgrade and padding attacks. Skipped when the generated file does not exist or allow_http_only is true."
+  remediation = "Re-run ./prepare from an unmodified installer bundle so nginx.conf is regenerated from the shipped template, then recreate the proxy container."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "tls"
+    severity = "high"
+    nist     = "SC-8,SC-13"
+    iso27001 = "A.8.24"
+  }
+  ref {
+    title = "Harbor: Configure HTTPS Access to Harbor"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-https/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8, SC-13"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.allow_http_only}' | grep -qx false && test -f '${var.harbor_dir}/common/config/nginx/nginx.conf'"
+    exit_status = 0
+  }
+  check "ssl-protocols" "file" {
+    path = "${var.harbor_dir}/common/config/nginx/nginx.conf"
+    content_match {
+      pattern = "^\\s*ssl_protocols\\s+.*TLSv1\\.2"
+      mode    = "regex"
+    }
+    content_match {
+      pattern = "^\\s*ssl_protocols\\s+.*(SSLv2|SSLv3|TLSv1|TLSv1\\.1)[\\s;]"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "harbor-tls-06" {
+  title       = "Proxy sends HSTS and clickjacking headers and hides its version"
+  description = "The generated nginx.conf must keep the Strict-Transport-Security and X-Frame-Options headers the template adds and server_tokens off, so browsers stay on HTTPS, the portal cannot be framed and the nginx version is not advertised. Skipped when the generated file does not exist or allow_http_only is true."
+  remediation = "Re-run ./prepare from an unmodified installer bundle so nginx.conf is regenerated, then recreate the proxy container."
+  impact      = 0.5
+  tags = {
+    app      = "harbor"
+    category = "hardening"
+    severity = "medium"
+    nist     = "SC-8,SC-18"
+    iso27001 = "A.8.24,A.8.26"
+  }
+  ref {
+    title = "Harbor: Configure HTTPS Access to Harbor"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-https/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8, SC-18"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.8.26"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.allow_http_only}' | grep -qx false && test -f '${var.harbor_dir}/common/config/nginx/nginx.conf'"
+    exit_status = 0
+  }
+  check "security-headers" "file" {
+    path = "${var.harbor_dir}/common/config/nginx/nginx.conf"
+    content_match {
+      pattern = "^\\s*add_header\\s+Strict-Transport-Security\\s+\"max-age=[0-9]+"
+      mode    = "regex"
+    }
+    content_match {
+      pattern = "^\\s*add_header\\s+X-Frame-Options\\s+(DENY|SAMEORIGIN)"
+      mode    = "regex"
+    }
+    content_match {
+      pattern = "^\\s*server_tokens\\s+off\\s*;"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-tls-07" {
+  title       = "Internal CA private key is private"
+  description = "With internal TLS enabled the CA key under internal_tls.dir signs every component certificate; anyone who reads it can impersonate core to the registry. Checked only when require_internal_tls is true and the key exists."
+  remediation = "chmod 0600 ${var.internal_tls_dir}/harbor_internal_ca.key and re-run ./prepare."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "secrets"
+    severity = "high"
+    nist     = "SC-12,AC-3"
+    iso27001 = "A.8.24,A.8.3"
+  }
+  ref {
+    title = "Harbor: Configure Internal TLS communication between Harbor Component"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-internal-tls/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-12, AC-3"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.require_internal_tls}' | grep -qx true && test -f '${var.internal_tls_dir}/harbor_internal_ca.key'"
+    exit_status = 0
+  }
+  check "internal-ca-key" "file" {
+    path        = "${var.internal_tls_dir}/harbor_internal_ca.key"
+    permissions = "<= 0600"
+  }
+  check "internal-ca-cert" "x509_certificate" {
+    path               = "${var.internal_tls_dir}/harbor_internal_ca.crt"
+    expiry_within_days = var.cert_expiry_days
+  }
+}

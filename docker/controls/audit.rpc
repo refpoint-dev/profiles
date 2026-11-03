@@ -1,0 +1,112 @@
+# Linux audit rules over the Docker files and directories. Gated on auditd running so hosts without an audit daemon are
+# skipped rather than failed.
+
+control "docker-audit-01" {
+  title       = "Audit rules cover the dockerd binary and the Docker service units"
+  description = "Changes to ${var.dockerd_binary}, ${var.docker_unit_file} and ${var.docker_socket_unit_file} must be recorded by auditd."
+  remediation = "Add -w ${var.dockerd_binary} -k docker, -w ${var.docker_unit_file} -k docker and -w ${var.docker_socket_unit_file} -k docker to /etc/audit/rules.d/docker.rules and run augenrules --load."
+  impact      = 0.6
+  tags = {
+    app      = "docker"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12,SI-7"
+    iso27001 = "A.8.15,A.8.16"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, SI-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.audit_service
+    running = true
+  }
+  check "dockerd-binary" "auditd" {
+    rule    = "-w ${var.dockerd_binary}"
+    present = true
+  }
+  check "service-unit" "auditd" {
+    rule    = "-w ${var.docker_unit_file}"
+    present = true
+  }
+  check "socket-unit" "auditd" {
+    rule    = "-w ${var.docker_socket_unit_file}"
+    present = true
+  }
+}
+
+control "docker-audit-02" {
+  title       = "Audit rules cover the Docker data root and configuration directory"
+  description = "Writes under ${var.data_root} and ${var.config_dir}, including daemon.json, must generate audit events."
+  remediation = "Add -w ${var.data_root} -k docker, -w ${var.config_dir} -k docker and -w ${var.daemon_json} -k docker to /etc/audit/rules.d/docker.rules and run augenrules --load."
+  impact      = 0.6
+  tags = {
+    app      = "docker"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12,SI-7"
+    iso27001 = "A.8.15,A.8.16"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, SI-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.audit_service
+    running = true
+  }
+  check "data-root" "auditd" {
+    rule    = "-w ${var.data_root}"
+    present = true
+  }
+  check "config-dir" "auditd" {
+    rule    = "-w ${var.config_dir}"
+    present = true
+  }
+  check "daemon-json" "auditd" {
+    rule    = "-w ${var.daemon_json}"
+    present = true
+  }
+}
+
+control "docker-audit-03" {
+  title       = "Audit rules cover the Docker and containerd sockets"
+  description = "Access to ${var.docker_socket} and ${var.containerd_socket} is root-equivalent and must be recorded."
+  remediation = "Add -w ${var.docker_socket} -k docker and -w ${var.containerd_socket} -k docker to /etc/audit/rules.d/docker.rules and run augenrules --load."
+  impact      = 0.6
+  tags = {
+    app      = "docker"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12"
+    iso27001 = "A.8.15,A.8.16"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.audit_service
+    running = true
+  }
+  check "docker-socket" "auditd" {
+    rule    = "-w ${var.docker_socket}"
+    present = true
+  }
+  check "containerd-socket" "auditd" {
+    rule    = "-w ${var.containerd_socket}"
+    present = true
+  }
+}

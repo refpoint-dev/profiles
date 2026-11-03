@@ -1,0 +1,127 @@
+profile "harbor-health" {
+  title       = "Harbor Health and Image Check"
+  description = "Lightweight operational check of a Harbor registry installed with the official installer: every component container is running and runs the goharbor image of the expected release given by harbor_version (including the Trivy adapter), all components share one release, and the API health endpoint reports every component healthy. For hardening use the harbor profile instead."
+  version     = "1.0.0"
+  author      = "refpoint"
+  platform    = ["linux"]
+
+  # Every executable the command checks below run, including those after
+  # pipes. This is a self-limit; the operator's --allowed-commands is the ceiling.
+  allowed_commands = ["docker", "curl", "grep", "xargs", "awk", "sort", "printf"]
+
+  variable "base_url" {
+    type        = "string"
+    default     = "https://127.0.0.1:443"
+    description = "Base URL of the Harbor API as reachable from the target host itself, scheme://host:port with no path (a trailing slash is tolerated; the certificate is not verified). Must be the same address that answers curl -k <base_url>/api/v2.0/health"
+    validation {
+      condition     = var.base_url != ""
+      error_message = "base_url must not be empty"
+    }
+  }
+
+  variable "health_file" {
+    type        = "string"
+    default     = "/tmp/refpoint-harbor-health.json"
+    description = "Path on the target where the health response is saved before the json resource reads it; overwritten on every run"
+    validation {
+      condition     = var.health_file != ""
+      error_message = "health_file must not be empty"
+    }
+  }
+
+  variable "harbor_version" {
+    type        = "string"
+    default     = "v2.15.0"
+    description = "Image tag every component container must run, e.g. v2.15.0; set it to the release you deployed"
+    validation {
+      condition     = length(regexall("^v?[0-9]+\\.[0-9]+\\.[0-9]+$", var.harbor_version)) > 0
+      error_message = "harbor_version must look like v2.15.0"
+    }
+  }
+
+  variable "image_repo_prefix" {
+    type        = "string"
+    default     = "goharbor/"
+    description = "Registry/namespace prefix every component image must start with"
+    validation {
+      condition     = var.image_repo_prefix != ""
+      error_message = "image_repo_prefix must not be empty"
+    }
+  }
+
+  variable "require_trivy" {
+    type        = "bool"
+    default     = true
+    description = "Fail when the Trivy adapter container is missing; set false for deployments installed without --with-trivy"
+  }
+
+  variable "proxy_container" {
+    type        = "string"
+    default     = "nginx"
+    description = "Name of the nginx proxy container; its presence gates every control"
+    validation {
+      condition     = var.proxy_container != ""
+      error_message = "proxy_container must not be empty"
+    }
+  }
+
+  variable "core_container" {
+    type        = "string"
+    default     = "harbor-core"
+    description = "Name of the core API container"
+  }
+
+  variable "portal_container" {
+    type        = "string"
+    default     = "harbor-portal"
+    description = "Name of the web UI container"
+  }
+
+  variable "jobservice_container" {
+    type        = "string"
+    default     = "harbor-jobservice"
+    description = "Name of the job service container"
+  }
+
+  variable "registry_container" {
+    type        = "string"
+    default     = "registry"
+    description = "Name of the Distribution registry container"
+  }
+
+  variable "registryctl_container" {
+    type        = "string"
+    default     = "registryctl"
+    description = "Name of the registry controller container"
+  }
+
+  variable "db_container" {
+    type        = "string"
+    default     = "harbor-db"
+    description = "Name of the bundled PostgreSQL container; skipped when absent (external database)"
+  }
+
+  variable "redis_container" {
+    type        = "string"
+    default     = "redis"
+    description = "Name of the bundled Redis container; skipped when absent (external redis)"
+  }
+
+  variable "log_container" {
+    type        = "string"
+    default     = "harbor-log"
+    description = "Name of the log collector container; skipped when absent (external log endpoint)"
+  }
+
+  variable "trivy_container" {
+    type        = "string"
+    default     = "trivy-adapter"
+    description = "Name of the Trivy scanner adapter container"
+  }
+
+  variable "exporter_container" {
+    type        = "string"
+    default     = "harbor-exporter"
+    description = "Name of the Prometheus exporter container; skipped when absent (metrics disabled)"
+  }
+}

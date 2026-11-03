@@ -1,0 +1,173 @@
+# Automatic security updates. NIST SP 800-53 SI-2, flaw remediation.
+
+control "base-upd-01" {
+  title       = "An automatic update agent is installed"
+  description = "Security patches must be applied without waiting for a manual maintenance window. Debian-family hosts use unattended-upgrades; RHEL-family hosts use dnf-automatic (or the older yum-cron). One of them must be installed."
+  remediation = "Debian/Ubuntu: 'apt-get install unattended-upgrades'. RHEL/Fedora: 'dnf install dnf-automatic'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "updates"
+    severity = "high"
+    nist     = "SI-2"
+    iso27001 = "A.8.8"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "update-agent-installed" {
+    check "unattended-upgrades" "package" {
+      name      = "unattended-upgrades"
+      installed = true
+    }
+    check "dnf-automatic" "package" {
+      name      = "dnf-automatic"
+      installed = true
+    }
+    check "yum-cron" "package" {
+      name      = "yum-cron"
+      installed = true
+    }
+  }
+}
+
+control "base-upd-02" {
+  title       = "The automatic update timer is enabled"
+  description = "Installing the agent is not enough: the systemd timer or service that triggers it must be enabled. apt-daily-upgrade.timer drives unattended-upgrades; dnf-automatic.timer or dnf-automatic-install.timer drives dnf-automatic."
+  remediation = "Debian/Ubuntu: 'systemctl enable --now apt-daily-upgrade.timer'. RHEL/Fedora: 'systemctl enable --now dnf-automatic-install.timer'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "updates"
+    severity = "high"
+    nist     = "SI-2"
+    iso27001 = "A.8.8"
+  }
+  ref {
+    title = "Debian wiki: UnattendedUpgrades"
+    url   = "https://wiki.debian.org/UnattendedUpgrades"
+  }
+  ref {
+    title = "dnf-automatic documentation"
+    url   = "https://dnf.readthedocs.io/en/latest/automatic.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "update-timer-enabled" {
+    check "apt-daily-upgrade" "service" {
+      name    = "apt-daily-upgrade.timer"
+      enabled = true
+    }
+    check "dnf-automatic" "service" {
+      name    = "dnf-automatic.timer"
+      enabled = true
+    }
+    check "dnf-automatic-install" "service" {
+      name    = "dnf-automatic-install.timer"
+      enabled = true
+    }
+    check "yum-cron" "service" {
+      name    = "yum-cron"
+      enabled = true
+    }
+  }
+}
+
+control "base-upd-03" {
+  title       = "APT periodic unattended upgrades are switched on"
+  description = "On Debian-family hosts the unattended-upgrades package only acts when APT::Periodic::Unattended-Upgrade is set to a non-zero value. This control runs only where the package is installed."
+  remediation = "Run 'dpkg-reconfigure -plow unattended-upgrades' or write 'APT::Periodic::Update-Package-Lists \"1\";' and 'APT::Periodic::Unattended-Upgrade \"1\";' to ${var.apt_auto_upgrades_conf}."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "updates"
+    severity = "medium"
+    nist     = "SI-2"
+    iso27001 = "A.8.8"
+  }
+  ref {
+    title = "Debian wiki: UnattendedUpgrades"
+    url   = "https://wiki.debian.org/UnattendedUpgrades"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "unattended-upgrades"
+    installed = true
+  }
+
+  check "periodic-upgrade" "file" {
+    path   = var.apt_auto_upgrades_conf
+    exists = true
+    content_match {
+      pattern = "^\\s*APT::Periodic::Unattended-Upgrade\\s+\"[1-9][0-9]*\";"
+      mode    = "regex"
+    }
+  }
+
+  check "periodic-update-lists" "file" {
+    path = var.apt_auto_upgrades_conf
+    content_match {
+      pattern = "^\\s*APT::Periodic::Update-Package-Lists\\s+\"[1-9][0-9]*\";"
+      mode    = "regex"
+    }
+  }
+}
+
+control "base-upd-04" {
+  title       = "dnf-automatic is configured to apply updates"
+  description = "dnf-automatic defaults to download-only. apply_updates must be yes so that security updates are actually installed. This control runs only where the package is installed."
+  remediation = "Set 'apply_updates = yes' (and optionally 'upgrade_type = security') in ${var.dnf_automatic_conf} and enable dnf-automatic-install.timer."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "updates"
+    severity = "medium"
+    nist     = "SI-2"
+    iso27001 = "A.8.8"
+  }
+  ref {
+    title = "dnf-automatic documentation"
+    url   = "https://dnf.readthedocs.io/en/latest/automatic.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "dnf-automatic"
+    installed = true
+  }
+
+  check "apply-updates" "file" {
+    path   = var.dnf_automatic_conf
+    exists = true
+    content_match {
+      pattern = "^\\s*apply_updates\\s*=\\s*(yes|true|1)\\s*$"
+      mode    = "regex"
+    }
+  }
+}

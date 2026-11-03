@@ -1,0 +1,735 @@
+profile "linux-baseline" {
+  title       = "Linux Server Baseline"
+  description = "Distribution-independent hardening baseline for Linux servers: filesystem partitioning and mount options, automatic updates, SSH daemon hardening, account and password policy, sudo, auditd, logging, time synchronisation, mandatory access control, kernel hardening, unnecessary services, cron, login banners and host naming. Every path, port, user and threshold is a variable so the profile can be adapted to a site policy without editing controls."
+  version     = "1.0.0"
+  author      = "refpoint"
+  platform    = ["linux"]
+
+  # Every executable the command checks run, including those inside $( ) and
+  # after pipes. The operator's own allow list remains the ceiling.
+  allowed_commands = ["find", "wc", "awk", "test", "stat", "hostname", "sshd", "grep"]
+
+  # ---- filesystem ------------------------------------------------------------
+
+  variable "tmp_mount" {
+    type        = "string"
+    default     = "/tmp"
+    description = "Mount point that must be a separate filesystem for temporary files"
+    validation {
+      condition     = var.tmp_mount != ""
+      error_message = "tmp_mount must not be empty"
+    }
+  }
+
+  variable "tmp_mount_options" {
+    type        = "list(string)"
+    default     = ["nodev", "nosuid", "noexec"]
+    description = "Mount options that must all be present on the /tmp filesystem"
+    validation {
+      condition     = length(var.tmp_mount_options) > 0
+      error_message = "tmp_mount_options must list at least one option"
+    }
+  }
+
+  variable "dev_shm_mount" {
+    type        = "string"
+    default     = "/dev/shm"
+    description = "Mount point of the shared-memory tmpfs"
+    validation {
+      condition     = var.dev_shm_mount != ""
+      error_message = "dev_shm_mount must not be empty"
+    }
+  }
+
+  variable "dev_shm_mount_options" {
+    type        = "list(string)"
+    default     = ["nodev", "nosuid", "noexec"]
+    description = "Mount options that must all be present on /dev/shm"
+    validation {
+      condition     = length(var.dev_shm_mount_options) > 0
+      error_message = "dev_shm_mount_options must list at least one option"
+    }
+  }
+
+  variable "var_mount" {
+    type        = "string"
+    default     = "/var"
+    description = "Mount point that must be a separate filesystem for variable data"
+    validation {
+      condition     = var.var_mount != ""
+      error_message = "var_mount must not be empty"
+    }
+  }
+
+  variable "var_mount_options" {
+    type        = "list(string)"
+    default     = ["nodev", "nosuid"]
+    description = "Mount options that must all be present on the /var filesystem"
+    validation {
+      condition     = length(var.var_mount_options) > 0
+      error_message = "var_mount_options must list at least one option"
+    }
+  }
+
+  variable "var_log_mount" {
+    type        = "string"
+    default     = "/var/log"
+    description = "Mount point that must be a separate filesystem for logs"
+    validation {
+      condition     = var.var_log_mount != ""
+      error_message = "var_log_mount must not be empty"
+    }
+  }
+
+  variable "var_log_mount_options" {
+    type        = "list(string)"
+    default     = ["nodev", "nosuid", "noexec"]
+    description = "Mount options that must all be present on the /var/log filesystem"
+    validation {
+      condition     = length(var.var_log_mount_options) > 0
+      error_message = "var_log_mount_options must list at least one option"
+    }
+  }
+
+  variable "home_mount" {
+    type        = "string"
+    default     = "/home"
+    description = "Mount point that must be a separate filesystem for user home directories"
+    validation {
+      condition     = var.home_mount != ""
+      error_message = "home_mount must not be empty"
+    }
+  }
+
+  variable "home_mount_options" {
+    type        = "list(string)"
+    default     = ["nodev", "nosuid"]
+    description = "Mount options that must all be present on the /home filesystem"
+    validation {
+      condition     = length(var.home_mount_options) > 0
+      error_message = "home_mount_options must list at least one option"
+    }
+  }
+
+  variable "filesystem_scan_roots" {
+    type        = "list(string)"
+    default     = ["/", "/tmp", "/var", "/var/log", "/home"]
+    description = "Mount points scanned (each with -xdev) for world-writable directories without the sticky bit and for unowned files"
+    validation {
+      condition     = length(var.filesystem_scan_roots) > 0
+      error_message = "filesystem_scan_roots must list at least one path"
+    }
+  }
+
+  variable "modprobe_dir" {
+    type        = "string"
+    default     = "/etc/modprobe.d"
+    description = "Directory of modprobe configuration fragments where unused filesystems and USB storage are disabled"
+    validation {
+      condition     = var.modprobe_dir != ""
+      error_message = "modprobe_dir must not be empty"
+    }
+  }
+
+  variable "grub_cfg_debian" {
+    type        = "string"
+    default     = "/boot/grub/grub.cfg"
+    description = "GRUB configuration path on Debian-family distributions"
+    validation {
+      condition     = var.grub_cfg_debian != ""
+      error_message = "grub_cfg_debian must not be empty"
+    }
+  }
+
+  variable "grub_cfg_rhel" {
+    type        = "string"
+    default     = "/boot/grub2/grub.cfg"
+    description = "GRUB configuration path on RHEL-family distributions"
+    validation {
+      condition     = var.grub_cfg_rhel != ""
+      error_message = "grub_cfg_rhel must not be empty"
+    }
+  }
+
+  # ---- updates ---------------------------------------------------------------
+
+  variable "apt_auto_upgrades_conf" {
+    type        = "string"
+    default     = "/etc/apt/apt.conf.d/20auto-upgrades"
+    description = "APT configuration fragment that turns on periodic unattended upgrades on Debian-family hosts"
+    validation {
+      condition     = var.apt_auto_upgrades_conf != ""
+      error_message = "apt_auto_upgrades_conf must not be empty"
+    }
+  }
+
+  variable "dnf_automatic_conf" {
+    type        = "string"
+    default     = "/etc/dnf/automatic.conf"
+    description = "dnf-automatic configuration file on RHEL-family hosts"
+    validation {
+      condition     = var.dnf_automatic_conf != ""
+      error_message = "dnf_automatic_conf must not be empty"
+    }
+  }
+
+  # ---- ssh -------------------------------------------------------------------
+
+  variable "sshd_config_path" {
+    type        = "string"
+    default     = "/etc/ssh/sshd_config"
+    description = "Path of the main sshd configuration file"
+    validation {
+      condition     = var.sshd_config_path != ""
+      error_message = "sshd_config_path must not be empty"
+    }
+  }
+
+  variable "sshd_config_dir" {
+    type        = "string"
+    default     = "/etc/ssh/sshd_config.d"
+    description = "Directory of sshd configuration drop-ins"
+    validation {
+      condition     = var.sshd_config_dir != ""
+      error_message = "sshd_config_dir must not be empty"
+    }
+  }
+
+  variable "sshd_service" {
+    type        = "string"
+    default     = "sshd"
+    description = "systemd unit name of the SSH daemon (sshd on RHEL-family, ssh on Debian-family)"
+  }
+
+  variable "sshd_process" {
+    type        = "string"
+    default     = "sshd"
+    description = "Process name of the SSH daemon that must own the SSH listener"
+  }
+
+  variable "ssh_port" {
+    type        = "number"
+    default     = 22
+    description = "TCP port the SSH daemon listens on"
+    validation {
+      condition     = var.ssh_port >= 1 && var.ssh_port <= 65535
+      error_message = "ssh_port must be a valid TCP port (1-65535)"
+    }
+  }
+
+  variable "ssh_password_authentication" {
+    type        = "string"
+    default     = "no"
+    description = "Expected effective value of PasswordAuthentication (no for key-only hosts)"
+    validation {
+      condition     = contains(["yes", "no"], var.ssh_password_authentication)
+      error_message = "ssh_password_authentication must be yes or no"
+    }
+  }
+
+  variable "ssh_allow_tcp_forwarding" {
+    type        = "string"
+    default     = "no"
+    description = "Expected effective value of AllowTcpForwarding (yes only on bastions that need port forwarding)"
+    validation {
+      condition     = contains(["yes", "no", "local", "remote"], var.ssh_allow_tcp_forwarding)
+      error_message = "ssh_allow_tcp_forwarding must be one of yes, no, local, remote"
+    }
+  }
+
+  variable "ssh_max_auth_tries" {
+    type        = "number"
+    default     = 4
+    description = "Highest acceptable MaxAuthTries"
+    validation {
+      condition     = var.ssh_max_auth_tries >= 1 && var.ssh_max_auth_tries <= 10
+      error_message = "ssh_max_auth_tries must be between 1 and 10"
+    }
+  }
+
+  variable "ssh_max_sessions" {
+    type        = "number"
+    default     = 10
+    description = "Highest acceptable MaxSessions per connection"
+    validation {
+      condition     = var.ssh_max_sessions >= 1 && var.ssh_max_sessions <= 100
+      error_message = "ssh_max_sessions must be between 1 and 100"
+    }
+  }
+
+  variable "ssh_client_alive_interval" {
+    type        = "number"
+    default     = 300
+    description = "Highest acceptable ClientAliveInterval in seconds"
+    validation {
+      condition     = var.ssh_client_alive_interval >= 1 && var.ssh_client_alive_interval <= 900
+      error_message = "ssh_client_alive_interval must be between 1 and 900 seconds"
+    }
+  }
+
+  variable "ssh_client_alive_count_max" {
+    type        = "number"
+    default     = 3
+    description = "Highest acceptable ClientAliveCountMax"
+    validation {
+      condition     = var.ssh_client_alive_count_max >= 0 && var.ssh_client_alive_count_max <= 10
+      error_message = "ssh_client_alive_count_max must be between 0 and 10"
+    }
+  }
+
+  variable "ssh_login_grace_time" {
+    type        = "number"
+    default     = 60
+    description = "Highest acceptable LoginGraceTime in seconds"
+    validation {
+      condition     = var.ssh_login_grace_time >= 1 && var.ssh_login_grace_time <= 120
+      error_message = "ssh_login_grace_time must be between 1 and 120 seconds"
+    }
+  }
+
+  variable "ssh_required_cipher" {
+    type        = "string"
+    default     = "aes256-gcm@openssh.com"
+    description = "A strong cipher that must be present in the effective Ciphers list"
+    validation {
+      condition     = var.ssh_required_cipher != ""
+      error_message = "ssh_required_cipher must not be empty"
+    }
+  }
+
+  variable "ssh_required_mac" {
+    type        = "string"
+    default     = "hmac-sha2-512-etm@openssh.com"
+    description = "A strong MAC that must be present in the effective MACs list"
+    validation {
+      condition     = var.ssh_required_mac != ""
+      error_message = "ssh_required_mac must not be empty"
+    }
+  }
+
+  variable "ssh_required_kex" {
+    type        = "string"
+    default     = "curve25519-sha256"
+    description = "A strong key exchange algorithm that must be present in the effective KexAlgorithms list"
+    validation {
+      condition     = var.ssh_required_kex != ""
+      error_message = "ssh_required_kex must not be empty"
+    }
+  }
+
+  variable "ssh_log_level" {
+    type        = "string"
+    default     = "VERBOSE"
+    description = "Expected effective LogLevel (VERBOSE records key fingerprints per login)"
+    validation {
+      condition     = contains(["INFO", "VERBOSE"], var.ssh_log_level)
+      error_message = "ssh_log_level must be INFO or VERBOSE"
+    }
+  }
+
+  variable "ssh_banner" {
+    type        = "string"
+    default     = "/etc/issue.net"
+    description = "File the SSH daemon must present as its pre-authentication Banner"
+    validation {
+      condition     = var.ssh_banner != ""
+      error_message = "ssh_banner must not be empty"
+    }
+  }
+
+  # ---- accounts --------------------------------------------------------------
+
+  variable "login_defs" {
+    type        = "string"
+    default     = "/etc/login.defs"
+    description = "Path of the shadow password suite configuration"
+    validation {
+      condition     = var.login_defs != ""
+      error_message = "login_defs must not be empty"
+    }
+  }
+
+  variable "pass_max_days" {
+    type        = "number"
+    default     = 365
+    description = "Highest acceptable PASS_MAX_DAYS and maximum password age for existing accounts"
+    validation {
+      condition     = var.pass_max_days >= 1 && var.pass_max_days <= 365
+      error_message = "pass_max_days must be between 1 and 365"
+    }
+  }
+
+  variable "pass_min_days" {
+    type        = "number"
+    default     = 1
+    description = "Lowest acceptable PASS_MIN_DAYS and minimum password age for existing accounts"
+    validation {
+      condition     = var.pass_min_days >= 1 && var.pass_min_days <= 30
+      error_message = "pass_min_days must be between 1 and 30"
+    }
+  }
+
+  variable "pass_warn_age" {
+    type        = "number"
+    default     = 7
+    description = "Lowest acceptable PASS_WARN_AGE in days"
+    validation {
+      condition     = var.pass_warn_age >= 1 && var.pass_warn_age <= 90
+      error_message = "pass_warn_age must be between 1 and 90"
+    }
+  }
+
+  variable "passwd_file" {
+    type        = "string"
+    default     = "/etc/passwd"
+    description = "Path of the account database"
+    validation {
+      condition     = var.passwd_file != ""
+      error_message = "passwd_file must not be empty"
+    }
+  }
+
+  variable "shadow_file" {
+    type        = "string"
+    default     = "/etc/shadow"
+    description = "Path of the shadow password database"
+    validation {
+      condition     = var.shadow_file != ""
+      error_message = "shadow_file must not be empty"
+    }
+  }
+
+  variable "group_file" {
+    type        = "string"
+    default     = "/etc/group"
+    description = "Path of the group database"
+    validation {
+      condition     = var.group_file != ""
+      error_message = "group_file must not be empty"
+    }
+  }
+
+  variable "gshadow_file" {
+    type        = "string"
+    default     = "/etc/gshadow"
+    description = "Path of the shadow group database"
+    validation {
+      condition     = var.gshadow_file != ""
+      error_message = "gshadow_file must not be empty"
+    }
+  }
+
+  variable "root_user" {
+    type        = "string"
+    default     = "root"
+    description = "Name of the superuser account"
+    validation {
+      condition     = var.root_user != ""
+      error_message = "root_user must not be empty"
+    }
+  }
+
+  variable "root_shell" {
+    type        = "string"
+    default     = "/bin/bash"
+    description = "Login shell expected on the root account"
+    validation {
+      condition     = var.root_shell != ""
+      error_message = "root_shell must not be empty"
+    }
+  }
+
+  variable "root_home" {
+    type        = "string"
+    default     = "/root"
+    description = "Home directory expected on the root account"
+    validation {
+      condition     = var.root_home != ""
+      error_message = "root_home must not be empty"
+    }
+  }
+
+  variable "umask" {
+    type        = "string"
+    default     = "027"
+    description = "Default umask that must be set for login shells (three octal digits)"
+    validation {
+      condition     = contains(["027", "077"], var.umask)
+      error_message = "umask must be 027 or 077"
+    }
+  }
+
+  variable "profile_file" {
+    type        = "string"
+    default     = "/etc/profile"
+    description = "System-wide login shell profile"
+    validation {
+      condition     = var.profile_file != ""
+      error_message = "profile_file must not be empty"
+    }
+  }
+
+  variable "profile_dir" {
+    type        = "string"
+    default     = "/etc/profile.d"
+    description = "Directory of login shell profile fragments"
+    validation {
+      condition     = var.profile_dir != ""
+      error_message = "profile_dir must not be empty"
+    }
+  }
+
+  # ---- sudo ------------------------------------------------------------------
+
+  variable "sudoers_file" {
+    type        = "string"
+    default     = "/etc/sudoers"
+    description = "Path of the main sudoers file"
+    validation {
+      condition     = var.sudoers_file != ""
+      error_message = "sudoers_file must not be empty"
+    }
+  }
+
+  variable "sudoers_dir" {
+    type        = "string"
+    default     = "/etc/sudoers.d"
+    description = "Directory of sudoers drop-ins"
+    validation {
+      condition     = var.sudoers_dir != ""
+      error_message = "sudoers_dir must not be empty"
+    }
+  }
+
+  # ---- audit -----------------------------------------------------------------
+
+  variable "auditd_service" {
+    type        = "string"
+    default     = "auditd"
+    description = "systemd unit name of the audit daemon"
+  }
+
+  variable "audit_log_dir" {
+    type        = "string"
+    default     = "/var/log/audit"
+    description = "Directory the audit daemon writes its logs to"
+    validation {
+      condition     = var.audit_log_dir != ""
+      error_message = "audit_log_dir must not be empty"
+    }
+  }
+
+  variable "audit_rules_dir" {
+    type        = "string"
+    default     = "/etc/audit/rules.d"
+    description = "Directory of persistent audit rule files"
+    validation {
+      condition     = var.audit_rules_dir != ""
+      error_message = "audit_rules_dir must not be empty"
+    }
+  }
+
+  variable "localtime_file" {
+    type        = "string"
+    default     = "/etc/localtime"
+    description = "Timezone file whose changes must be audited"
+    validation {
+      condition     = var.localtime_file != ""
+      error_message = "localtime_file must not be empty"
+    }
+  }
+
+  variable "lastlog_file" {
+    type        = "string"
+    default     = "/var/log/lastlog"
+    description = "Login record file whose changes must be audited"
+    validation {
+      condition     = var.lastlog_file != ""
+      error_message = "lastlog_file must not be empty"
+    }
+  }
+
+  # ---- logging ---------------------------------------------------------------
+
+  variable "rsyslog_service" {
+    type        = "string"
+    default     = "rsyslog"
+    description = "systemd unit name of rsyslog"
+  }
+
+  variable "journald_conf" {
+    type        = "string"
+    default     = "/etc/systemd/journald.conf"
+    description = "Path of the main journald configuration"
+    validation {
+      condition     = var.journald_conf != ""
+      error_message = "journald_conf must not be empty"
+    }
+  }
+
+  variable "journald_conf_dir" {
+    type        = "string"
+    default     = "/etc/systemd/journald.conf.d"
+    description = "Directory of journald configuration drop-ins"
+    validation {
+      condition     = var.journald_conf_dir != ""
+      error_message = "journald_conf_dir must not be empty"
+    }
+  }
+
+  variable "journal_dir" {
+    type        = "string"
+    default     = "/var/log/journal"
+    description = "Directory journald uses for persistent storage"
+    validation {
+      condition     = var.journal_dir != ""
+      error_message = "journal_dir must not be empty"
+    }
+  }
+
+  variable "logrotate_conf" {
+    type        = "string"
+    default     = "/etc/logrotate.conf"
+    description = "Path of the main logrotate configuration"
+    validation {
+      condition     = var.logrotate_conf != ""
+      error_message = "logrotate_conf must not be empty"
+    }
+  }
+
+  # ---- time ------------------------------------------------------------------
+
+  variable "chrony_service_debian" {
+    type        = "string"
+    default     = "chrony"
+    description = "systemd unit name of chrony on Debian-family distributions"
+  }
+
+  variable "chrony_service_rhel" {
+    type        = "string"
+    default     = "chronyd"
+    description = "systemd unit name of chrony on RHEL-family distributions"
+  }
+
+  variable "timesyncd_service" {
+    type        = "string"
+    default     = "systemd-timesyncd"
+    description = "systemd unit name of systemd-timesyncd"
+  }
+
+  variable "max_time_offset_ms" {
+    type        = "number"
+    default     = 500
+    description = "Largest acceptable clock offset from the time source in milliseconds"
+    validation {
+      condition     = var.max_time_offset_ms >= 1 && var.max_time_offset_ms <= 60000
+      error_message = "max_time_offset_ms must be between 1 and 60000"
+    }
+  }
+
+  # ---- kernel and core dumps -------------------------------------------------
+
+  variable "limits_conf" {
+    type        = "string"
+    default     = "/etc/security/limits.conf"
+    description = "Path of the main PAM limits configuration"
+    validation {
+      condition     = var.limits_conf != ""
+      error_message = "limits_conf must not be empty"
+    }
+  }
+
+  variable "limits_dir" {
+    type        = "string"
+    default     = "/etc/security/limits.d"
+    description = "Directory of PAM limits drop-ins"
+    validation {
+      condition     = var.limits_dir != ""
+      error_message = "limits_dir must not be empty"
+    }
+  }
+
+  variable "coredump_conf" {
+    type        = "string"
+    default     = "/etc/systemd/coredump.conf"
+    description = "Path of the systemd-coredump configuration"
+    validation {
+      condition     = var.coredump_conf != ""
+      error_message = "coredump_conf must not be empty"
+    }
+  }
+
+  # ---- cron ------------------------------------------------------------------
+
+  variable "crontab_file" {
+    type        = "string"
+    default     = "/etc/crontab"
+    description = "Path of the system crontab"
+    validation {
+      condition     = var.crontab_file != ""
+      error_message = "crontab_file must not be empty"
+    }
+  }
+
+  variable "cron_conf_dir" {
+    type        = "string"
+    default     = "/etc"
+    description = "Parent directory of cron.d, cron.hourly, cron.daily, cron.weekly and cron.monthly"
+    validation {
+      condition     = var.cron_conf_dir != ""
+      error_message = "cron_conf_dir must not be empty"
+    }
+  }
+
+  # ---- banners and network ---------------------------------------------------
+
+  variable "motd_file" {
+    type        = "string"
+    default     = "/etc/motd"
+    description = "Message of the day shown after login"
+    validation {
+      condition     = var.motd_file != ""
+      error_message = "motd_file must not be empty"
+    }
+  }
+
+  variable "issue_file" {
+    type        = "string"
+    default     = "/etc/issue"
+    description = "Local login banner"
+    validation {
+      condition     = var.issue_file != ""
+      error_message = "issue_file must not be empty"
+    }
+  }
+
+  variable "issue_net_file" {
+    type        = "string"
+    default     = "/etc/issue.net"
+    description = "Remote login banner"
+    validation {
+      condition     = var.issue_net_file != ""
+      error_message = "issue_net_file must not be empty"
+    }
+  }
+
+  variable "hosts_file" {
+    type        = "string"
+    default     = "/etc/hosts"
+    description = "Static host table"
+    validation {
+      condition     = var.hosts_file != ""
+      error_message = "hosts_file must not be empty"
+    }
+  }
+
+  variable "hostname_file" {
+    type        = "string"
+    default     = "/etc/hostname"
+    description = "File holding the persistent static hostname"
+    validation {
+      condition     = var.hostname_file != ""
+      error_message = "hostname_file must not be empty"
+    }
+  }
+}

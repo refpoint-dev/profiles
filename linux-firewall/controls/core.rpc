@@ -1,0 +1,219 @@
+# Backend-independent controls: effective policy as seen by the firewall
+# resource, exactly one backend active, and what is listening.
+
+control "fw-core-01" {
+  title       = "A host firewall is enabled"
+  description = "The firewall resource probes ufw, firewalld and nftables in turn and reports whether any of them is active with a ruleset loaded. A host with no active packet filter accepts every inbound connection."
+  remediation = "Enable one backend: 'ufw enable', 'systemctl enable --now firewalld', or install a ruleset in /etc/nftables.conf and 'systemctl enable --now nftables'."
+  impact      = 1.0
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "critical"
+    nist     = "SC-7,CM-7"
+    iso27001 = "A.8.20,A.8.21"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.21"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "enabled" "firewall" {
+    enabled = true
+  }
+}
+
+control "fw-core-02" {
+  title       = "Default incoming policy is deny"
+  description = "Whatever backend is active, unsolicited inbound traffic must be dropped or rejected by default so that only explicitly allowed services are reachable."
+  remediation = "ufw: 'ufw default deny incoming'. firewalld: keep the default zone target at default/DROP. nftables: give the input base chain 'policy drop'."
+  impact      = 1.0
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "critical"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "incoming" "firewall" {
+    enabled          = true
+    default_incoming = "deny"
+  }
+}
+
+control "fw-core-03" {
+  title       = "Default outgoing policy matches the expected value"
+  description = "The outgoing default policy is compared with var.default_outgoing. Most servers allow outbound traffic; egress-filtered hosts set the variable to deny."
+  remediation = "ufw: 'ufw default ${var.default_outgoing} outgoing'. firewalld/nftables: adjust the output chain policy accordingly."
+  impact      = 0.4
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "low"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "outgoing" "firewall" {
+    enabled          = true
+    default_outgoing = var.default_outgoing
+  }
+}
+
+control "fw-core-04" {
+  title       = "Exactly one firewall backend is active"
+  description = "Running ufw, firewalld and nftables side by side leads to conflicting rulesets where one manager silently overrides another. At least one of the three services must be running and no more than one may be."
+  remediation = "Pick one backend, disable and mask the others: 'systemctl disable --now ufw' / 'firewalld' / 'nftables' as appropriate."
+  impact      = 0.8
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "CM-6,CM-7"
+    iso27001 = "A.8.9,A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "one-backend-running" {
+    check "ufw" "service" {
+      name    = var.ufw_service
+      running = true
+    }
+    check "firewalld" "service" {
+      name    = var.firewalld_service
+      running = true
+    }
+    check "nftables" "service" {
+      name    = var.nftables_service
+      running = true
+    }
+  }
+
+  check "not-more-than-one" "command" {
+    cmd = "systemctl is-active ${var.ufw_service} ${var.firewalld_service} ${var.nftables_service} 2>/dev/null | grep -cx active"
+    stdout_match {
+      pattern = "1"
+      mode    = "exact"
+    }
+  }
+}
+
+control "fw-core-05" {
+  title       = "SSH daemon listens on the expected port"
+  description = "The SSH daemon must be bound on var.ssh_port so that the SSH allowance in the firewall actually corresponds to the service. A mismatch means either the rule or the daemon is misconfigured."
+  remediation = "Align 'Port' in sshd_config with var.ssh_port, or set the variable to the port in use, then restart sshd."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "medium"
+    nist     = "CM-6,SC-7"
+    iso27001 = "A.8.9,A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "ssh-listener" "port" {
+    port      = var.ssh_port
+    listening = true
+    protocol  = "tcp"
+    process   = var.sshd_process
+  }
+}
+
+control "fw-core-06" {
+  title       = "No forbidden services are listening"
+  description = "Legacy or lateral-movement services (telnet, portmapper, SMB/NetBIOS, NFS, X11) must not be listening on any address. The check inspects 'ss -tlnp' and fails on any socket whose local port is in var.forbidden_ports."
+  remediation = "Stop and disable the service owning the socket, or remove the package. Firewalling the port is not a substitute for not running the service."
+  impact      = 0.8
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "CM-7,SC-7"
+    iso27001 = "A.8.20,A.8.21"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7, SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.21"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "no-forbidden-listeners" "command" {
+    cmd         = "ss -H -tln"
+    exit_status = 0
+    stdout_match {
+      pattern = ":(${join("|", var.forbidden_ports)})\\s"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "fw-core-07" {
+  title       = "The active firewall backend is the expected one"
+  description = "When var.expected_backend is set, the backend the firewall resource detects as active must be that one. This catches hosts where an image change or a package pull-in silently swapped ufw for firewalld (or vice versa) so that the operator's rule management no longer targets the live backend. Skipped when the variable is left empty."
+  remediation = "Enable the expected backend and disable the others, or set var.expected_backend to the backend the host is meant to run."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "medium"
+    nist     = "CM-6,CM-7"
+    iso27001 = "A.8.9,A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test -n \"${var.expected_backend}\""
+    exit_status = 0
+  }
+
+  check "backend" "firewall" {
+    enabled = true
+    backend = var.expected_backend
+  }
+}

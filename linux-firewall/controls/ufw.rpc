@@ -1,0 +1,395 @@
+# ufw (Uncomplicated Firewall). Every control is gated on the ufw package so
+# firewalld and nftables hosts skip this file entirely.
+
+control "fw-ufw-01" {
+  title       = "ufw is active"
+  description = "'ufw status verbose' must report Status: active. An installed but inactive ufw leaves the host unfiltered."
+  remediation = "Run 'ufw enable' and confirm with 'ufw status verbose'."
+  impact      = 1.0
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "critical"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "ufw"
+    installed = true
+  }
+
+  check "status-active" "command" {
+    cmd         = "ufw status verbose"
+    exit_status = 0
+    stdout_match {
+      pattern = "^Status:\\s+active"
+      mode    = "regex"
+    }
+  }
+
+  check "service" "service" {
+    name    = var.ufw_service
+    running = true
+    enabled = true
+  }
+}
+
+control "fw-ufw-02" {
+  title       = "ufw logging is enabled"
+  description = "Blocked packets must be logged so that scans and policy violations are visible in the system log. 'ufw status verbose' reports the logging state."
+  remediation = "Run 'ufw logging on' (or 'ufw logging low' at minimum)."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12,SI-4"
+    iso27001 = "A.8.15,A.8.16"
+  }
+  ref {
+    title = "ufw manual page: LOGGING"
+    url   = "https://manpages.ubuntu.com/manpages/noble/en/man8/ufw.8.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, SI-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "ufw"
+    installed = true
+  }
+
+  check "logging-on" "command" {
+    cmd         = "ufw status verbose"
+    exit_status = 0
+    stdout_match {
+      pattern = "^Logging:\\s+on"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-ufw-03" {
+  title       = "ufw default policy denies incoming and allows outgoing"
+  description = "The default policy line reported by 'ufw status verbose' must deny (or reject) incoming traffic and apply var.default_outgoing to outgoing traffic."
+  remediation = "Run 'ufw default deny incoming' and 'ufw default ${var.default_outgoing} outgoing'."
+  impact      = 0.9
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "ufw"
+    installed = true
+  }
+
+  check "deny-incoming" "command" {
+    cmd         = "ufw status verbose"
+    exit_status = 0
+    stdout_match {
+      pattern = "^Default:\\s+(deny|reject) \\(incoming\\)"
+      mode    = "regex"
+    }
+  }
+
+  check "outgoing-policy" "command" {
+    cmd         = "ufw status verbose"
+    exit_status = 0
+    stdout_match {
+      pattern = "^Default:\\s+\\S+ \\(incoming\\),\\s+${var.default_outgoing} \\(outgoing\\)"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-ufw-04" {
+  title       = "SSH is allowed through ufw with rate limiting"
+  description = "The SSH port must be present in the ruleset as a LIMIT rule rather than a plain ALLOW, so that more than six connection attempts in 30 seconds from one source are dropped."
+  remediation = "Replace the plain allow rule: 'ufw delete allow ${var.ssh_port}/tcp' then 'ufw limit ${var.ssh_port}/tcp'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7,AC-7"
+    iso27001 = "A.8.20,A.8.5"
+  }
+  ref {
+    title = "ufw manual page: RATE LIMITING"
+    url   = "https://manpages.ubuntu.com/manpages/noble/en/man8/ufw.8.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, AC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.5"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "ufw"
+    installed = true
+  }
+
+  check "ssh-limit-rule" "command" {
+    cmd         = "ufw status verbose"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.ssh_port}(/tcp)?\\s+LIMIT IN"
+      mode    = "regex"
+    }
+  }
+
+  check "no-plain-ssh-allow" "command" {
+    cmd         = "ufw status verbose"
+    exit_status = 0
+    stdout_match {
+      pattern = "^${var.ssh_port}(/tcp)?\\s+ALLOW IN\\s+Anywhere"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "fw-ufw-05" {
+  title       = "ufw is persisted as enabled in ufw.conf"
+  description = "ENABLED=yes in the ufw state file makes the ruleset load at boot. A runtime-only 'ufw enable' that is not persisted leaves the host open after a reboot."
+  remediation = "Run 'ufw enable', which writes ENABLED=yes to ${var.ufw_conf}; verify the file is root-owned and not world-writable."
+  impact      = 0.8
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "ufw"
+    installed = true
+  }
+
+  check "enabled-yes" "file" {
+    path        = var.ufw_conf
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0644"
+    content_match {
+      pattern = "^\\s*ENABLED=yes\\s*$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-ufw-06" {
+  title       = "ufw defaults drop input and forward traffic"
+  description = "The kernel-level defaults in /etc/default/ufw must be DROP for INPUT and FORWARD so that traffic not matched by a rule is silently discarded even before the ufw chains are consulted."
+  remediation = "Set DEFAULT_INPUT_POLICY=\"DROP\" and DEFAULT_FORWARD_POLICY=\"DROP\" in ${var.ufw_defaults} and run 'ufw reload'."
+  impact      = 0.8
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "ufw"
+    installed = true
+  }
+
+  check "default-input-drop" "file" {
+    path        = var.ufw_defaults
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0644"
+    content_match {
+      pattern = "^\\s*DEFAULT_INPUT_POLICY=\"?DROP\"?\\s*$"
+      mode    = "regex"
+    }
+  }
+
+  check "default-forward-drop" "file" {
+    path = var.ufw_defaults
+    content_match {
+      pattern = "^\\s*DEFAULT_FORWARD_POLICY=\"?DROP\"?\\s*$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-ufw-07" {
+  title       = "ufw filters IPv6 when IPv6 is in use"
+  description = "With IPV6=no ufw only installs IPv4 rules, leaving every IPv6 address on the host unfiltered. This control runs only when var.ipv6_enabled is true."
+  remediation = "Set IPV6=yes in ${var.ufw_defaults} and run 'ufw reload'."
+  impact      = 0.8
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "Ubuntu Server Guide: Firewall (ufw)"
+    url   = "https://ubuntu.com/server/docs/firewalls"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test \"${var.ipv6_enabled}\" = true && test -f \"${var.ufw_defaults}\""
+    exit_status = 0
+  }
+
+  check "ipv6-yes" "file" {
+    path = var.ufw_defaults
+    content_match {
+      pattern = "^\\s*IPV6=yes\\s*$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-ufw-08" {
+  title       = "ufw before.rules accepts loopback traffic"
+  description = "Loopback traffic must be accepted unconditionally in before.rules; without it local services that talk to themselves over 127.0.0.1 break, and traffic claiming a loopback source on another interface should additionally be dropped."
+  remediation = "Ensure ${var.ufw_before_rules} contains '-A ufw-before-input -i lo -j ACCEPT' and '-A ufw-before-output -o lo -j ACCEPT', then 'ufw reload'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "medium"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "ufw"
+    installed = true
+  }
+
+  check "loopback-input" "file" {
+    path        = var.ufw_before_rules
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0640"
+    content_match {
+      pattern = "^-A ufw-before-input -i lo -j ACCEPT\\s*$"
+      mode    = "regex"
+    }
+  }
+
+  check "loopback-output" "file" {
+    path = var.ufw_before_rules
+    content_match {
+      pattern = "^-A ufw-before-output -o lo -j ACCEPT\\s*$"
+      mode    = "regex"
+    }
+  }
+
+  check "loopback-runtime" "command" {
+    cmd         = "ufw status verbose"
+    exit_status = 0
+    stdout_match {
+      pattern = "^Anywhere on lo\\s+ALLOW IN"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-ufw-09" {
+  title       = "ufw rule files are root-owned and not world-readable"
+  description = "user.rules and user6.rules are the generated iptables rulesets ufw loads; they reveal the full policy and, if writable by others, allow it to be altered before the next reload. ufw ships them as 0640 root:root."
+  remediation = "chown root:root ${var.ufw_rules_dir}/user.rules ${var.ufw_rules_dir}/user6.rules && chmod 0640 ${var.ufw_rules_dir}/user.rules ${var.ufw_rules_dir}/user6.rules"
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "AC-6,CM-6"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "ufw manual page: FILES"
+    url   = "https://manpages.ubuntu.com/manpages/noble/en/man8/ufw.8.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "ufw"
+    installed = true
+  }
+
+  check "user-rules" "file" {
+    path        = "${var.ufw_rules_dir}/user.rules"
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0640"
+  }
+
+  check "user6-rules" "file" {
+    path        = "${var.ufw_rules_dir}/user6.rules"
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0640"
+  }
+}

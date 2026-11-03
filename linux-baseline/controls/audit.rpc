@@ -1,0 +1,346 @@
+# Linux audit framework. Rules are matched against both the loaded ruleset
+# (auditctl -l) and the persistent rules.d files.
+
+control "base-audit-01" {
+  title       = "auditd is installed, running and enabled"
+  description = "The audit daemon is the only kernel-level record of who executed what; it must be present (audit on RHEL-family, auditd on Debian-family), running, and enabled at boot."
+  remediation = "Install the audit package ('apt-get install auditd' or 'dnf install audit') and run 'systemctl enable --now ${var.auditd_service}'."
+  impact      = 0.8
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "high"
+    nist     = "AU-2,AU-12"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "audit-package" {
+    check "auditd" "package" {
+      name      = "auditd"
+      installed = true
+    }
+    check "audit" "package" {
+      name      = "audit"
+      installed = true
+    }
+  }
+
+  check "service" "service" {
+    name    = var.auditd_service
+    running = true
+    enabled = true
+  }
+}
+
+control "base-audit-02" {
+  title       = "Auditing is enabled from boot"
+  description = "Processes that start before auditd (systemd, early units) are not audited unless the kernel is booted with audit=1. The kernel command line must carry it."
+  remediation = "Add 'audit=1' to GRUB_CMDLINE_LINUX in /etc/default/grub, regenerate grub.cfg and reboot."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-12,AU-2"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-12, AU-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.auditd_service
+    running = true
+  }
+
+  check "audit-boot-param" "boot_params" {
+    contains     = ["audit=1"]
+    not_contains = ["audit=0"]
+  }
+}
+
+control "base-audit-03" {
+  title       = "Changes to identity files are audited"
+  description = "Watches on passwd, group, shadow and gshadow record every account, group and credential change together with the process and user that made it."
+  remediation = "Add to ${var.audit_rules_dir}/50-identity.rules: '-w ${var.passwd_file} -p wa -k identity', '-w ${var.group_file} -p wa -k identity', '-w ${var.shadow_file} -p wa -k identity', '-w ${var.gshadow_file} -p wa -k identity'; then 'augenrules --load'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "high"
+    nist     = "AU-2,AU-12,AC-2"
+    iso27001 = "A.8.15,A.5.16"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, AC-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.5.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.auditd_service
+    running = true
+  }
+
+  check "passwd" "auditd" {
+    rule    = "-w ${var.passwd_file}\\s"
+    present = true
+  }
+
+  check "group" "auditd" {
+    rule    = "-w ${var.group_file}\\s"
+    present = true
+  }
+
+  check "shadow" "auditd" {
+    rule    = "-w ${var.shadow_file}\\s"
+    present = true
+  }
+
+  check "gshadow" "auditd" {
+    rule    = "-w ${var.gshadow_file}\\s"
+    present = true
+  }
+}
+
+control "base-audit-04" {
+  title       = "Changes to sudoers are audited"
+  description = "Watches on the sudoers file and its drop-in directory record every change to who may escalate privileges."
+  remediation = "Add to ${var.audit_rules_dir}/50-scope.rules: '-w ${var.sudoers_file} -p wa -k scope' and '-w ${var.sudoers_dir}/ -p wa -k scope'; then 'augenrules --load'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "high"
+    nist     = "AU-2,AU-12,AC-6"
+    iso27001 = "A.8.15,A.8.2"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.2"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.auditd_service
+    running = true
+  }
+
+  check "sudoers" "auditd" {
+    rule    = "-w ${var.sudoers_file}\\s"
+    present = true
+  }
+
+  check "sudoers-d" "auditd" {
+    rule    = "-w ${var.sudoers_dir}/?\\s"
+    present = true
+  }
+}
+
+control "base-audit-05" {
+  title       = "Login and logout events are audited"
+  description = "Watches on the lastlog file and on the failed-login records (faillog, faillock directory or btmp) capture successful and failed login attempts."
+  remediation = "Add to ${var.audit_rules_dir}/50-logins.rules: '-w ${var.lastlog_file} -p wa -k logins' and '-w /var/run/faillock/ -p wa -k logins' (or /var/log/faillog); then 'augenrules --load'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12,AC-7"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, AC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.auditd_service
+    running = true
+  }
+
+  check "lastlog" "auditd" {
+    rule    = "-w ${var.lastlog_file}\\s"
+    present = true
+  }
+
+  any_of "failed-logins" {
+    check "faillock" "auditd" {
+      rule    = "-w /var/run/faillock/?\\s"
+      present = true
+    }
+    check "faillog" "auditd" {
+      rule    = "-w /var/log/faillog\\s"
+      present = true
+    }
+    check "btmp" "auditd" {
+      rule    = "-w /var/log/btmp\\s"
+      present = true
+    }
+  }
+}
+
+control "base-audit-06" {
+  title       = "Time changes are audited"
+  description = "Tampering with the clock is the classic way to make log timelines useless. The adjtimex and settimeofday syscalls and writes to the timezone file must be recorded."
+  remediation = "Add to ${var.audit_rules_dir}/50-time-change.rules: '-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change', the b32 equivalent, and '-w ${var.localtime_file} -p wa -k time-change'; then 'augenrules --load'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-8,AU-12"
+    iso27001 = "A.8.15,A.8.17"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-8, AU-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.auditd_service
+    running = true
+  }
+
+  check "adjtimex" "auditd" {
+    rule    = "-S\\s+\\S*\\badjtimex\\b"
+    present = true
+  }
+
+  check "settimeofday" "auditd" {
+    rule    = "-S\\s+\\S*\\bsettimeofday\\b"
+    present = true
+  }
+
+  check "localtime" "auditd" {
+    rule    = "-w ${var.localtime_file}\\s"
+    present = true
+  }
+}
+
+control "base-audit-07" {
+  title       = "Kernel module loading and unloading is audited"
+  description = "Loading a kernel module is the most direct way to disable security controls or install a rootkit. The init_module/finit_module and delete_module syscalls must be recorded."
+  remediation = "Add to ${var.audit_rules_dir}/50-modules.rules: '-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k modules' and the b32 equivalent; then 'augenrules --load'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12,CM-7"
+    iso27001 = "A.8.15,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.auditd_service
+    running = true
+  }
+
+  check "init-module" "auditd" {
+    rule    = "-S\\s+\\S*\\b(init_module|finit_module)\\b"
+    present = true
+  }
+
+  check "delete-module" "auditd" {
+    rule    = "-S\\s+\\S*\\bdelete_module\\b"
+    present = true
+  }
+}
+
+control "base-audit-08" {
+  title       = "Mount operations are audited"
+  description = "Mounting a filesystem can bypass mount-option protections and introduce removable media; every mount syscall by a real user must be recorded."
+  remediation = "Add to ${var.audit_rules_dir}/50-mounts.rules: '-a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=unset -k mounts' and the b32 equivalent; then 'augenrules --load'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.auditd_service
+    running = true
+  }
+
+  check "mount-syscall" "auditd" {
+    rule    = "-S\\s+\\S*\\bmount\\b"
+    present = true
+  }
+}
+
+control "base-audit-09" {
+  title       = "Audit configuration is immutable and the log directory is protected"
+  description = "With '-e 2' as the last rule the ruleset cannot be changed without a reboot, so an intruder cannot silently switch auditing off. The log directory must be readable only by root so the trail cannot be read or truncated by other users."
+  remediation = "Append '-e 2' to the last file in ${var.audit_rules_dir} (e.g. 99-finalize.rules), run 'augenrules --load' and reboot; chown root:root ${var.audit_log_dir} && chmod 0750 ${var.audit_log_dir}."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-9,AU-12"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-9, AU-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "service" {
+    name    = var.auditd_service
+    running = true
+  }
+
+  check "immutable" "auditd" {
+    rule    = "^\\s*-e\\s+2\\s*$"
+    present = true
+  }
+
+  check "log-dir" "directory" {
+    path        = var.audit_log_dir
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0750"
+  }
+}

@@ -1,0 +1,167 @@
+# What the deployment exposes on the host: only the proxy's HTTP/HTTPS ports
+# and the loopback-only syslog port of the log collector.
+
+control "harbor-net-01" {
+  title       = "HTTPS port is published by the proxy and listening on the expected address"
+  description = "The proxy must publish its internal 8443 listener on https_port bound to bind_address (loopback when an external reverse proxy on the same host fronts Harbor). Skipped when allow_http_only is true."
+  remediation = "Set https.port: ${var.https_port} in ${var.config_file}, run ./prepare and recreate the proxy; adjust the compose port mapping to ${var.bind_address}:${var.https_port}:8443 if a specific bind address is required."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "network"
+    severity = "high"
+    nist     = "CM-6,SC-7"
+    iso27001 = "A.8.20,A.8.21"
+  }
+  ref {
+    title = "Harbor: Configure HTTPS Access to Harbor"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-https/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.21"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.allow_http_only}' | grep -qx false && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "https-listening" "port" {
+    port      = var.https_port
+    listening = true
+    protocol  = "tcp"
+    address   = var.bind_address
+  }
+  check "https-published" "command" {
+    cmd         = "docker port '${var.proxy_container}' 8443"
+    exit_status = 0
+    stdout_match {
+      pattern = ":${var.https_port}$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-net-02" {
+  title       = "Plain-HTTP port only redirects to HTTPS"
+  description = "With an https block configured the proxy keeps http_port open solely to redirect. A 200 on the API over plain HTTP means the deployment serves tokens unencrypted. Skipped when allow_http_only is true."
+  remediation = "Configure the https block in ${var.config_file}, run ./prepare and recreate the proxy so the http server block becomes a redirect."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "tls"
+    severity = "high"
+    nist     = "SC-8,SC-23"
+    iso27001 = "A.8.24"
+  }
+  ref {
+    title = "Harbor: Configure HTTPS Access to Harbor"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-https/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8, SC-23"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.allow_http_only}' | grep -qx false && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "http-redirects" "command" {
+    cmd         = "curl -sS -o /dev/null -w '%%{http_code}' 'http://127.0.0.1:${var.http_port}/api/v2.0/systeminfo'"
+    exit_status = 0
+    stdout_match {
+      pattern = "^30[1278]$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-net-03" {
+  title       = "Internal components publish no host ports"
+  description = "Core, portal, jobservice, registry, registryctl, database, redis and the scanner are reached through the proxy over the harbor network. A published port on any of them bypasses TLS termination and authentication at the proxy, and exposes the unauthenticated redis and the database directly."
+  remediation = "Remove the ports: entry from the service in ${var.harbor_dir}/docker-compose.yml and recreate it."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7,CM-7"
+    iso27001 = "A.8.20,A.8.22"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.22"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.core_container}'"
+    exit_status = 0
+  }
+  check "no-port-bindings" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.trivy_container})' | xargs docker inspect -f '{{.Name}} {{len .HostConfig.PortBindings}}' | awk '$2 != 0 {bad=1; print} END{if (NR == 0) exit 2; exit bad}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-net-04" {
+  title       = "Log collector syslog port is bound to loopback only"
+  description = "The collector receives unauthenticated syslog from the other components on syslog_port. It must be published on 127.0.0.1 only; on any other address anyone on the network can inject or flood log entries. Skipped when the collector container is absent."
+  remediation = "Keep the shipped mapping 127.0.0.1:${var.syslog_port}:10514 for the log service in ${var.harbor_dir}/docker-compose.yml and recreate it."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "network"
+    severity = "medium"
+    nist     = "SC-7,AU-9"
+    iso27001 = "A.8.20,A.8.15"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, AU-9"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.log_container}'"
+    exit_status = 0
+  }
+  check "published-on-loopback" "command" {
+    cmd         = "docker port '${var.log_container}' 10514"
+    exit_status = 0
+    stdout_match {
+      pattern = "^127\\.0\\.0\\.1:${var.syslog_port}$"
+      mode    = "regex"
+    }
+    stdout_match {
+      pattern = "^(0\\.0\\.0\\.0|\\[::\\]|:::)"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+  check "listening-on-loopback" "port" {
+    port      = var.syslog_port
+    listening = true
+    protocol  = "tcp"
+    address   = "127.0.0.1"
+  }
+}

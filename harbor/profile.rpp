@@ -1,0 +1,355 @@
+profile "harbor" {
+  title       = "Harbor Registry Hardening"
+  description = "Configuration, TLS, authentication, network exposure, container runtime, data protection, logging and API checks for a Harbor registry installed with the official installer (harbor.yml + docker compose). Covers every component the installer runs: nginx proxy, core, portal, jobservice, registry, registryctl, database, redis, log collector and the optional Trivy adapter and exporter. Runtime controls are gated on the component container being present; file controls run whenever the referenced file exists; authenticated API controls are skipped until api_password is supplied."
+  version     = "1.0.0"
+  author      = "refpoint"
+  platform    = ["linux"]
+
+  # Every executable run by the command checks below, including those
+  # after pipes, inside $( ) and inside gating only_if blocks. This is a
+  # self-limit, not a grant: the operator's --allowed-commands remains
+  # the ceiling.
+  allowed_commands = ["docker", "curl", "grep", "printf", "sort", "head", "awk", "stat", "test", "xargs"]
+
+  # ------------------------------------------------------------ installation
+
+  variable "harbor_dir" {
+    type        = "string"
+    default     = "/opt/harbor"
+    description = "Directory the installer bundle was extracted to; holds harbor.yml, the generated docker-compose.yml and common/config"
+    validation {
+      condition     = var.harbor_dir != ""
+      error_message = "harbor_dir must not be empty"
+    }
+  }
+
+  variable "config_file" {
+    type        = "string"
+    default     = "/opt/harbor/harbor.yml"
+    description = "Path of harbor.yml, the installer input that holds the admin and database passwords; its presence gates the configuration controls"
+    validation {
+      condition     = var.config_file != ""
+      error_message = "config_file must not be empty"
+    }
+  }
+
+  variable "config_owner" {
+    type        = "string"
+    default     = "root"
+    description = "Expected owner of harbor.yml and the generated compose file"
+  }
+
+  variable "data_dir" {
+    type        = "string"
+    default     = "/data"
+    description = "Value of data_volume in harbor.yml: host directory holding the database, redis, registry blobs, job logs and secret keys"
+    validation {
+      condition     = var.data_dir != ""
+      error_message = "data_dir must not be empty"
+    }
+  }
+
+  variable "log_dir" {
+    type        = "string"
+    default     = "/var/log/harbor"
+    description = "Value of log.local.location in harbor.yml: host directory the log collector writes component logs to"
+    validation {
+      condition     = var.log_dir != ""
+      error_message = "log_dir must not be empty"
+    }
+  }
+
+  variable "harbor_uid" {
+    type        = "number"
+    default     = 10000
+    description = "Numeric uid the Harbor components run as inside their containers and that must own the secret material under data_dir"
+    validation {
+      condition     = var.harbor_uid >= 1
+      error_message = "harbor_uid must be a non-root uid"
+    }
+  }
+
+  variable "min_version" {
+    type        = "string"
+    default     = "2.12.0"
+    description = "Oldest acceptable Harbor release (compared with sort -V against harbor_version from /api/v2.0/systeminfo)"
+    validation {
+      condition     = var.min_version != ""
+      error_message = "min_version must not be empty"
+    }
+  }
+
+  # -------------------------------------------------------------- containers
+
+  variable "proxy_container" {
+    type        = "string"
+    default     = "nginx"
+    description = "Name of the nginx proxy container that terminates TLS and publishes the HTTP/HTTPS ports; its presence gates most runtime controls"
+    validation {
+      condition     = var.proxy_container != ""
+      error_message = "proxy_container must not be empty"
+    }
+  }
+
+  variable "core_container" {
+    type        = "string"
+    default     = "harbor-core"
+    description = "Name of the core API container"
+  }
+
+  variable "portal_container" {
+    type        = "string"
+    default     = "harbor-portal"
+    description = "Name of the web UI container"
+  }
+
+  variable "jobservice_container" {
+    type        = "string"
+    default     = "harbor-jobservice"
+    description = "Name of the job service container (replication, scanning, garbage collection)"
+  }
+
+  variable "registry_container" {
+    type        = "string"
+    default     = "registry"
+    description = "Name of the Distribution registry container that stores blobs"
+  }
+
+  variable "registryctl_container" {
+    type        = "string"
+    default     = "registryctl"
+    description = "Name of the registry controller container"
+  }
+
+  variable "db_container" {
+    type        = "string"
+    default     = "harbor-db"
+    description = "Name of the bundled PostgreSQL container; leave as is even when an external database is used, the controls skip when it is absent"
+  }
+
+  variable "redis_container" {
+    type        = "string"
+    default     = "redis"
+    description = "Name of the bundled Redis container"
+  }
+
+  variable "log_container" {
+    type        = "string"
+    default     = "harbor-log"
+    description = "Name of the rsyslog collector container every other component ships its logs to"
+  }
+
+  variable "trivy_container" {
+    type        = "string"
+    default     = "trivy-adapter"
+    description = "Name of the Trivy scanner adapter container (present only when installed with --with-trivy)"
+  }
+
+  variable "exporter_container" {
+    type        = "string"
+    default     = "harbor-exporter"
+    description = "Name of the Prometheus exporter container (present only when metric.enabled is true)"
+  }
+
+  variable "image_repo_prefix" {
+    type        = "string"
+    default     = "goharbor/"
+    description = "Registry/namespace prefix every Harbor component image must come from (substring anchored at the start of the image reference)"
+    validation {
+      condition     = var.image_repo_prefix != ""
+      error_message = "image_repo_prefix must not be empty"
+    }
+  }
+
+  # ----------------------------------------------------------------- network
+
+  variable "https_port" {
+    type        = "number"
+    default     = 443
+    description = "Host port the proxy publishes HTTPS on (https.port in harbor.yml)"
+    validation {
+      condition     = var.https_port >= 1 && var.https_port <= 65535
+      error_message = "https_port must be a valid TCP port"
+    }
+  }
+
+  variable "http_port" {
+    type        = "number"
+    default     = 80
+    description = "Host port the proxy publishes plain HTTP on (http.port in harbor.yml); with HTTPS configured it only redirects"
+    validation {
+      condition     = var.http_port >= 1 && var.http_port <= 65535
+      error_message = "http_port must be a valid TCP port"
+    }
+  }
+
+  variable "bind_address" {
+    type        = "string"
+    default     = "0.0.0.0"
+    description = "Address the HTTPS port must be bound to on the host (substring match); set to 127.0.0.1 when an external reverse proxy on the same host fronts Harbor"
+    validation {
+      condition     = var.bind_address != ""
+      error_message = "bind_address must not be empty"
+    }
+  }
+
+  variable "allow_http_only" {
+    type        = "bool"
+    default     = false
+    description = "Accept a deployment without an https block in harbor.yml (air-gapped test environments only); TLS controls are skipped and the plain-HTTP controls relaxed"
+  }
+
+  variable "syslog_port" {
+    type        = "number"
+    default     = 1514
+    description = "Host port the log collector container receives component logs on; must stay bound to loopback"
+    validation {
+      condition     = var.syslog_port >= 1 && var.syslog_port <= 65535
+      error_message = "syslog_port must be a valid TCP port"
+    }
+  }
+
+  variable "base_url" {
+    type        = "string"
+    default     = "https://127.0.0.1:443"
+    description = "Base URL of the Harbor API as reachable from the target host itself (curl runs on the target; the certificate is not verified)"
+    validation {
+      condition     = var.base_url != ""
+      error_message = "base_url must not be empty"
+    }
+  }
+
+  # --------------------------------------------------------------------- tls
+
+  variable "tls_cert_file" {
+    type        = "string"
+    default     = "/data/cert/server.crt"
+    description = "Host path of the server certificate referenced by https.certificate in harbor.yml; TLS file controls are skipped when absent"
+    validation {
+      condition     = var.tls_cert_file != ""
+      error_message = "tls_cert_file must not be empty"
+    }
+  }
+
+  variable "tls_key_file" {
+    type        = "string"
+    default     = "/data/cert/server.key"
+    description = "Host path of the private key referenced by https.private_key in harbor.yml"
+    validation {
+      condition     = var.tls_key_file != ""
+      error_message = "tls_key_file must not be empty"
+    }
+  }
+
+  variable "cert_expiry_days" {
+    type        = "number"
+    default     = 30
+    description = "Fail when the server certificate expires within this many days"
+    validation {
+      condition     = var.cert_expiry_days >= 1
+      error_message = "cert_expiry_days must be positive"
+    }
+  }
+
+  variable "require_strong_ciphers" {
+    type        = "bool"
+    default     = true
+    description = "Require https.strong_ssl_ciphers: true so the proxy only offers the hardened cipher list"
+  }
+
+  variable "require_internal_tls" {
+    type        = "bool"
+    default     = false
+    description = "Require internal_tls.enabled: true so component-to-component traffic on the harbor network is encrypted"
+  }
+
+  variable "internal_tls_dir" {
+    type        = "string"
+    default     = "/data/internal-tls"
+    description = "Value of internal_tls.dir: directory holding the internal CA and per-component certificates (checked only when require_internal_tls is true)"
+  }
+
+  # ------------------------------------------------------------ auth and api
+
+  variable "api_user" {
+    type        = "string"
+    default     = "admin"
+    description = "Harbor system administrator used for the authenticated configuration checks"
+  }
+
+  variable "api_password" {
+    type        = "string"
+    default     = "CHANGE_ME"
+    description = "Password for api_user. Override at run time; never commit a real value. While left at CHANGE_ME the authenticated controls are skipped. Sent to the local API only and never echoed."
+  }
+
+  variable "default_admin_password" {
+    type        = "string"
+    default     = "Harbor12345"
+    description = "Vendor default administrator password that must no longer be accepted by the API"
+  }
+
+  variable "default_db_password" {
+    type        = "string"
+    default     = "root123"
+    description = "Vendor default database.password in the harbor.yml template that must not be in use"
+  }
+
+  variable "require_external_auth" {
+    type        = "bool"
+    default     = false
+    description = "Require auth_mode to be an external provider (ldap_auth, oidc_auth, uaa_auth or http_auth) instead of the local database"
+  }
+
+  variable "project_creation_restriction" {
+    type        = "string"
+    default     = "adminonly"
+    description = "Required value of project_creation_restriction: adminonly or everyone"
+    validation {
+      condition     = contains(["adminonly", "everyone"], var.project_creation_restriction)
+      error_message = "project_creation_restriction must be adminonly or everyone"
+    }
+  }
+
+  variable "max_token_expiration_minutes" {
+    type        = "number"
+    default     = 30
+    description = "Maximum acceptable token_expiration (registry bearer token lifetime, minutes)"
+    validation {
+      condition     = var.max_token_expiration_minutes >= 1
+      error_message = "max_token_expiration_minutes must be positive"
+    }
+  }
+
+  variable "max_robot_token_days" {
+    type        = "number"
+    default     = 30
+    description = "Maximum acceptable robot_token_duration (default robot account lifetime, days)"
+    validation {
+      condition     = var.max_robot_token_days >= 1
+      error_message = "max_robot_token_days must be positive"
+    }
+  }
+
+  variable "max_session_timeout_minutes" {
+    type        = "number"
+    default     = 60
+    description = "Maximum acceptable session_timeout (web session idle timeout, minutes)"
+    validation {
+      condition     = var.max_session_timeout_minutes >= 1
+      error_message = "max_session_timeout_minutes must be positive"
+    }
+  }
+
+  variable "require_scanner" {
+    type        = "bool"
+    default     = true
+    description = "Require the Trivy adapter to be deployed (with_trivy in systeminfo) and a scan-all schedule to be configured"
+  }
+
+  variable "require_audit_forward" {
+    type        = "bool"
+    default     = false
+    description = "Require audit_log_forward_endpoint to point at an external syslog collector"
+  }
+}

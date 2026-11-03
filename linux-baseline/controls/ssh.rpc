@@ -1,0 +1,379 @@
+# SSH daemon hardening. Effective values come from 'sshd -T' through the
+# sshd_config resource, so drop-ins and Match blocks are honoured.
+
+control "base-ssh-01" {
+  title       = "sshd is running and listening on the expected port"
+  description = "The SSH daemon must be enabled at boot and bound on var.ssh_port as the process named by var.sshd_process, so that every other control in this file is reasoning about the daemon that actually serves logins."
+  remediation = "systemctl enable --now ${var.sshd_service}; align 'Port ${var.ssh_port}' in ${var.sshd_config_path} with the variable."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "availability"
+    severity = "medium"
+    nist     = "CM-6,AC-17"
+    iso27001 = "A.8.9,A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, AC-17"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "service" "service" {
+    name    = var.sshd_service
+    running = true
+    enabled = true
+  }
+
+  check "listener" "port" {
+    port      = var.ssh_port
+    listening = true
+    protocol  = "tcp"
+    process   = var.sshd_process
+  }
+}
+
+control "base-ssh-02" {
+  title       = "sshd_config is root-owned and not readable by others"
+  description = "The daemon configuration and its drop-in directory must be modifiable only by root; if another user can edit them they can disable every hardening setting below. The expected mode is 0600 root:root."
+  remediation = "chown root:root ${var.sshd_config_path} && chmod 0600 ${var.sshd_config_path}; chmod 0700 ${var.sshd_config_dir} if present."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "AC-6,CM-6"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "main-config" "file" {
+    path        = var.sshd_config_path
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0600"
+  }
+}
+
+control "base-ssh-03" {
+  title       = "Root login over SSH is disabled"
+  description = "Direct root logins defeat accountability: every administrator shares one identity and a leaked root key gives unrestricted access. PermitRootLogin must be no; administrators log in as themselves and escalate with sudo."
+  remediation = "Set 'PermitRootLogin no' in ${var.sshd_config_path} and reload sshd."
+  impact      = 0.9
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "high"
+    nist     = "AC-6,IA-2"
+    iso27001 = "A.8.2,A.8.5"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, IA-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.5"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "permit-root-login" "sshd_config" {
+    option "PermitRootLogin" {
+      value = "no"
+    }
+  }
+}
+
+control "base-ssh-04" {
+  title       = "SSH authentication methods match policy"
+  description = "PasswordAuthentication must equal var.ssh_password_authentication (no on key-only hosts), public key authentication must be enabled, and empty passwords must never be accepted."
+  remediation = "Set 'PasswordAuthentication ${var.ssh_password_authentication}', 'PubkeyAuthentication yes' and 'PermitEmptyPasswords no' in ${var.sshd_config_path} and reload sshd."
+  impact      = 0.9
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "high"
+    nist     = "IA-2,IA-5"
+    iso27001 = "A.8.5,A.5.17"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-2, IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.5, A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "password-authentication" "sshd_config" {
+    option "PasswordAuthentication" {
+      value = var.ssh_password_authentication
+    }
+  }
+
+  check "pubkey-authentication" "sshd_config" {
+    option "PubkeyAuthentication" {
+      value = "yes"
+    }
+  }
+
+  check "permit-empty-passwords" "sshd_config" {
+    option "PermitEmptyPasswords" {
+      value = "no"
+    }
+  }
+}
+
+control "base-ssh-05" {
+  title       = "SSH brute-force exposure is limited"
+  description = "MaxAuthTries caps the authentication attempts per connection and MaxSessions caps multiplexed sessions per connection; low values slow down password guessing and resource exhaustion."
+  remediation = "Set 'MaxAuthTries ${var.ssh_max_auth_tries}' and 'MaxSessions ${var.ssh_max_sessions}' in ${var.sshd_config_path} and reload sshd."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "medium"
+    nist     = "AC-7"
+    iso27001 = "A.8.5"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.5"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "max-auth-tries" "sshd_config" {
+    option "MaxAuthTries" {
+      max_value = var.ssh_max_auth_tries
+    }
+  }
+
+  check "max-sessions" "sshd_config" {
+    option "MaxSessions" {
+      max_value = var.ssh_max_sessions
+    }
+  }
+}
+
+control "base-ssh-06" {
+  title       = "SSH idle sessions and login attempts time out"
+  description = "ClientAliveInterval and ClientAliveCountMax together disconnect unresponsive sessions instead of leaving them open indefinitely; LoginGraceTime bounds how long an unauthenticated connection may hold a slot."
+  remediation = "Set 'ClientAliveInterval ${var.ssh_client_alive_interval}', 'ClientAliveCountMax ${var.ssh_client_alive_count_max}' and 'LoginGraceTime ${var.ssh_login_grace_time}' in ${var.sshd_config_path} and reload sshd."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "medium"
+    nist     = "AC-12,SC-10"
+    iso27001 = "A.8.5"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-12, SC-10"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.5"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "client-alive-interval" "sshd_config" {
+    option "ClientAliveInterval" {
+      min_value = 1
+      max_value = var.ssh_client_alive_interval
+    }
+  }
+
+  check "client-alive-count-max" "sshd_config" {
+    option "ClientAliveCountMax" {
+      max_value = var.ssh_client_alive_count_max
+    }
+  }
+
+  check "login-grace-time" "sshd_config" {
+    option "LoginGraceTime" {
+      min_value = 1
+      max_value = var.ssh_login_grace_time
+    }
+  }
+}
+
+control "base-ssh-07" {
+  title       = "SSH uses strong ciphers, MACs and key exchange"
+  description = "The effective algorithm lists must include the strong entries named by var.ssh_required_cipher, var.ssh_required_mac and var.ssh_required_kex, and must not include legacy algorithms (arcfour, 3DES, Blowfish, CAST, CBC modes, MD5/SHA-1/RIPEMD MACs, umac-64) that are considered weak."
+  remediation = "Set 'Ciphers ${var.ssh_required_cipher},chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-ctr', 'MACs ${var.ssh_required_mac},hmac-sha2-256-etm@openssh.com' and 'KexAlgorithms ${var.ssh_required_kex},curve25519-sha256@libssh.org,diffie-hellman-group16-sha512' in ${var.sshd_config_path} and reload sshd."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "tls"
+    severity = "high"
+    nist     = "SC-8,SC-13"
+    iso27001 = "A.8.24"
+  }
+  ref {
+    title = "Mozilla OpenSSH server guidelines"
+    url   = "https://infosec.mozilla.org/guidelines/openssh"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8, SC-13"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "cipher" "sshd_config" {
+    option "Ciphers" {
+      contains = var.ssh_required_cipher
+    }
+  }
+
+  check "mac" "sshd_config" {
+    option "MACs" {
+      contains = var.ssh_required_mac
+    }
+  }
+
+  check "kex" "sshd_config" {
+    option "KexAlgorithms" {
+      contains = var.ssh_required_kex
+    }
+  }
+
+  check "no-weak-algorithms" "command" {
+    cmd         = "sshd -T 2>/dev/null || /usr/sbin/sshd -T 2>/dev/null"
+    exit_status = 0
+    stdout_match {
+      pattern = "^(ciphers|macs|kexalgorithms)\\s.*(arcfour|3des|blowfish|cast128|-cbc|hmac-md5|hmac-ripemd|hmac-sha1\\b|umac-64|diffie-hellman-group1-|diffie-hellman-group-exchange-sha1|diffie-hellman-group14-sha1)"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "base-ssh-08" {
+  title       = "SSH forwarding features are disabled"
+  description = "X11 forwarding exposes the X server to remote clients and AllowTcpForwarding lets any authenticated user pivot through the host to internal networks. Both should be off on servers; the expected AllowTcpForwarding value is var.ssh_allow_tcp_forwarding."
+  remediation = "Set 'X11Forwarding no' and 'AllowTcpForwarding ${var.ssh_allow_tcp_forwarding}' in ${var.sshd_config_path} and reload sshd."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "network"
+    severity = "medium"
+    nist     = "CM-7,SC-7"
+    iso27001 = "A.8.20,A.8.22"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7, SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.22"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "x11-forwarding" "sshd_config" {
+    option "X11Forwarding" {
+      value = "no"
+    }
+  }
+
+  check "tcp-forwarding" "sshd_config" {
+    option "AllowTcpForwarding" {
+      value = var.ssh_allow_tcp_forwarding
+    }
+  }
+}
+
+control "base-ssh-09" {
+  title       = "SSH logs at the expected level and presents a banner"
+  description = "LogLevel VERBOSE records the fingerprint of the key used for each login, which is what makes key compromise investigable. The Banner must point at var.ssh_banner so that the legal notice is shown before authentication."
+  remediation = "Set 'LogLevel ${var.ssh_log_level}' and 'Banner ${var.ssh_banner}' in ${var.sshd_config_path} and reload sshd."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12,AC-8"
+    iso27001 = "A.8.15,A.5.10"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, AC-8"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.5.10"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "log-level" "sshd_config" {
+    option "LogLevel" {
+      value = var.ssh_log_level
+    }
+  }
+
+  check "banner" "sshd_config" {
+    option "Banner" {
+      value = var.ssh_banner
+    }
+  }
+}
+
+control "base-ssh-10" {
+  title       = "Legacy SSH authentication paths are disabled"
+  description = "Host-based authentication and rhosts trust rely on the client host's identity rather than the user's; PermitUserEnvironment lets a user bypass restrictions by injecting LD_PRELOAD and similar variables. PAM must remain in the loop so account restrictions apply."
+  remediation = "Set 'HostbasedAuthentication no', 'IgnoreRhosts yes', 'PermitUserEnvironment no' and 'UsePAM yes' in ${var.sshd_config_path} and reload sshd."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "medium"
+    nist     = "IA-2,CM-7"
+    iso27001 = "A.8.5,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: IA-2, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.5, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "hostbased-authentication" "sshd_config" {
+    option "HostbasedAuthentication" {
+      value = "no"
+    }
+  }
+
+  check "ignore-rhosts" "sshd_config" {
+    option "IgnoreRhosts" {
+      value = "yes"
+    }
+  }
+
+  check "permit-user-environment" "sshd_config" {
+    option "PermitUserEnvironment" {
+      value = "no"
+    }
+  }
+
+  check "use-pam" "sshd_config" {
+    option "UsePAM" {
+      value = "yes"
+    }
+  }
+}

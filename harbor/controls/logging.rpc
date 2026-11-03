@@ -1,0 +1,169 @@
+# Component log shipping, local log storage and audit log retention.
+
+control "harbor-log-01" {
+  title       = "Components ship their logs to syslog and none discards them"
+  description = "The compose file gives every component the syslog logging driver pointed at the collector (or log.external_endpoint). A component whose driver is none loses authentication events and errors; core in particular must use syslog so audit-relevant API activity is retained."
+  remediation = "Restore the shipped logging: driver: syslog block for the service in ${var.harbor_dir}/docker-compose.yml and recreate it."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.core_container}'"
+    exit_status = 0
+  }
+  check "core-syslog" "command" {
+    cmd         = "docker inspect -f '{{.HostConfig.LogConfig.Type}}' '${var.core_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "syslog"
+      mode    = "exact"
+    }
+  }
+  check "no-driver-none" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.proxy_container}|${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.log_container}|${var.trivy_container}|${var.exporter_container})' | xargs docker inspect -f '{{.Name}} {{.HostConfig.LogConfig.Type}}' | awk '$2 == \"none\" {bad=1; print} END{if (NR == 0) exit 2; exit bad}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-log-02" {
+  title       = "Local log directory exists and is not world-writable"
+  description = "log.local.location receives one file per component from the collector. It must exist and other users must not be able to truncate or replace the files. Skipped when the directory does not exist (external log endpoint)."
+  remediation = "mkdir -p ${var.log_dir} && chown ${var.harbor_uid}:${var.harbor_uid} ${var.log_dir} && chmod 0755 ${var.log_dir}"
+  impact      = 0.5
+  tags = {
+    app      = "harbor"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-9"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-9"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "directory" {
+    path   = var.log_dir
+    exists = true
+  }
+  check "log-dir" "directory" {
+    path        = var.log_dir
+    permissions = "<= 0755"
+  }
+  check "core-log-present" "folder_contents" {
+    path = var.log_dir
+    glob = "core.log*"
+    content_match {
+      pattern = "."
+      mode    = "regex"
+    }
+  }
+}
+
+control "harbor-log-03" {
+  title       = "Audit log is retained in the database or forwarded"
+  description = "skip_audit_log_database: true with no audit_log_forward_endpoint discards every push, pull and delete record. One of the two must hold. Requires api_password."
+  remediation = "In Administration > Configuration > System Settings either clear Skip Audit Log Database or set an Audit Log Forward Endpoint (syslog host:port)."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "logging"
+    severity = "high"
+    nist     = "AU-2,AU-4,AU-11"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "Harbor: Configure Global Settings"
+    url   = "https://goharbor.io/docs/2.15.0/administration/general-settings/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-4, AU-11"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.api_password}' != 'CHANGE_ME' && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  any_of "audit-retained" {
+    check "database-kept" "command" {
+      cmd         = "curl -ksS -u '${var.api_user}:${var.api_password}' '${var.base_url}/api/v2.0/configurations' | grep -oE '\"skip_audit_log_database\":\\{[^}]*\"value\":(true|false)'"
+      exit_status = 0
+      stdout_match {
+        pattern = "\"value\":false$"
+        mode    = "regex"
+      }
+    }
+    check "forward-endpoint" "command" {
+      cmd         = "curl -ksS -u '${var.api_user}:${var.api_password}' '${var.base_url}/api/v2.0/configurations' | grep -oE '\"audit_log_forward_endpoint\":\\{[^}]*\"value\":\"[^\"]*\"' | grep -cE '\"value\":\"[^\"]+\"$'"
+      stdout_match {
+        pattern = "1"
+        mode    = "exact"
+      }
+    }
+  }
+}
+
+control "harbor-log-04" {
+  title       = "Audit log is forwarded to an external collector"
+  description = "audit_log_forward_endpoint must name a syslog endpoint so audit records survive a compromise or loss of the Harbor database. Checked only when require_audit_forward is true; requires api_password."
+  remediation = "In Administration > Configuration > System Settings set Audit Log Forward Endpoint to harbor-log:10514 or an external syslog host:port."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-4,AU-9,AU-6"
+    iso27001 = "A.8.15,A.8.16"
+  }
+  ref {
+    title = "Harbor: Configure Global Settings"
+    url   = "https://goharbor.io/docs/2.15.0/administration/general-settings/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-4, AU-9, AU-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.require_audit_forward}' | grep -qx true && test '${var.api_password}' != 'CHANGE_ME' && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "forward-endpoint" "command" {
+    cmd         = "curl -ksS -u '${var.api_user}:${var.api_password}' '${var.base_url}/api/v2.0/configurations' | grep -oE '\"audit_log_forward_endpoint\":\\{[^}]*\"value\":\"[^\"]*\"' | grep -cE '\"value\":\"[^\"]+\"$'"
+    stdout_match {
+      pattern = "1"
+      mode    = "exact"
+    }
+  }
+}

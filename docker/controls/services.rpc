@@ -1,0 +1,376 @@
+# Daemon service state, API exposure, socket permissions, version and group
+# membership. Not gated: a docker profile assumes the engine is installed.
+
+control "docker-service-01" {
+  title       = "Docker daemon and containerd are running and enabled"
+  description = "dockerd delegates container lifecycle to containerd; both units must be active and start at boot, and the socket unit must be enabled so API activation survives a daemon restart."
+  remediation = "systemctl enable --now ${var.docker_unit} ${var.containerd_unit} ${var.docker_socket_unit}"
+  impact      = 0.6
+  tags = {
+    app      = "docker"
+    category = "availability"
+    severity = "medium"
+    nist     = "CM-6,CP-10"
+    iso27001 = "A.8.9,A.8.14"
+  }
+  ref {
+    title = "Docker docs: Start the daemon"
+    url   = "https://docs.docker.com/engine/daemon/start/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, CP-10"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.14"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "docker" "service" {
+    name    = var.docker_unit
+    running = true
+    enabled = true
+  }
+  check "docker-socket" "service" {
+    name    = var.docker_socket_unit
+    running = true
+    enabled = true
+  }
+  check "containerd" "service" {
+    name    = var.containerd_unit
+    running = true
+    enabled = true
+  }
+  check "dockerd-process" "process" {
+    name    = "dockerd"
+    running = true
+  }
+}
+
+control "docker-service-02" {
+  title       = "Docker API unix socket is root:docker 0660"
+  description = "The socket grants root-equivalent control of the host. It must be owned by root, group ${var.docker_group}, and not be readable or writable by others."
+  remediation = "Ensure SocketMode=0660 and SocketGroup=${var.docker_group} in ${var.docker_socket_unit_file}, then systemctl daemon-reload && systemctl restart ${var.docker_socket_unit}."
+  impact      = 0.9
+  tags = {
+    app      = "docker"
+    category = "filesystem"
+    severity = "critical"
+    nist     = "AC-3,AC-6"
+    iso27001 = "A.8.2,A.8.3"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "socket" "file" {
+    path        = var.docker_socket
+    exists      = true
+    owner       = "root"
+    group       = var.docker_group
+    permissions = "<= 0660"
+  }
+}
+
+control "docker-service-03" {
+  title       = "Docker API is not served over unencrypted TCP"
+  description = "Port ${var.api_plain_port} exposes the daemon without authentication to anyone who can reach it. Neither the unit file nor the legacy defaults file may pass -H tcp:// without TLS."
+  remediation = "Remove -H tcp://... from ${var.docker_unit_file} and ${var.default_file} (and \"hosts\" from daemon.json); use the unix socket or TLS on ${var.api_tls_port} with tlsverify."
+  impact      = 1.0
+  tags = {
+    app      = "docker"
+    category = "network"
+    severity = "critical"
+    nist     = "SC-7,SC-8,IA-2"
+    iso27001 = "A.8.20,A.8.21,A.8.24"
+  }
+  ref {
+    title = "Docker docs: Protect the daemon socket"
+    url   = "https://docs.docker.com/engine/security/protect-access/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, SC-8, IA-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.21, A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "plain-port" "port" {
+    port      = var.api_plain_port
+    listening = false
+  }
+  check "unit-file" "file" {
+    path = var.docker_unit_file
+    content_match {
+      pattern = "-H\\s+tcp://[^ ]*:${var.api_plain_port}\\b"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-service-04" {
+  title       = "TLS Docker API port is closed unless explicitly allowed"
+  description = "Only evaluated when tcp_api_allowed is false. Even with TLS, remote API access is an unnecessary exposure on hosts managed locally."
+  remediation = "Remove -H tcp:// from ${var.docker_unit_file} and \"hosts\" from ${var.daemon_json}, or set tcp_api_allowed = true and configure tlsverify."
+  impact      = 0.8
+  tags = {
+    app      = "docker"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7,CM-7"
+    iso27001 = "A.8.20,A.8.21"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.21"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.tcp_api_allowed}' = 'false'"
+    exit_status = 0
+  }
+  check "tls-port" "port" {
+    port      = var.api_tls_port
+    listening = false
+  }
+}
+
+control "docker-service-05" {
+  title       = "TCP API uses TLS with client verification"
+  description = "Only evaluated when tcp_api_allowed is true. The daemon must run with tlsverify against ${var.tls_ca_cert}, and the server key must be readable by root only."
+  remediation = "Configure \"tlsverify\": true, \"tlscacert\", \"tlscert\" and \"tlskey\" in ${var.daemon_json}; chmod 0400 ${var.tls_server_key}."
+  impact      = 0.9
+  tags = {
+    app      = "docker"
+    category = "tls"
+    severity = "critical"
+    nist     = "SC-8,IA-2,SC-12"
+    iso27001 = "A.8.24,A.5.17"
+  }
+  ref {
+    title = "Docker docs: Protect the daemon socket"
+    url   = "https://docs.docker.com/engine/security/protect-access/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8, IA-2, SC-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.tcp_api_allowed}' = 'true'"
+    exit_status = 0
+  }
+  check "tlsverify" "json" {
+    path = var.daemon_json
+    query ".tlsverify" {
+      exists     = true
+      equals     = true
+    }
+    query ".tlscacert" {
+      exists     = true
+      equals     = var.tls_ca_cert
+    }
+  }
+  check "server-key" "file" {
+    path        = var.tls_server_key
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0400"
+  }
+  check "ca-cert" "file" {
+    path        = var.tls_ca_cert
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0444"
+  }
+}
+
+control "docker-service-06" {
+  title       = "Legacy /etc/default/docker does not enable a TCP listener"
+  description = "Checked only when ${var.default_file} exists. DOCKER_OPTS in the legacy defaults file must not add -H tcp://."
+  remediation = "Remove any -H tcp:// option from DOCKER_OPTS in ${var.default_file} and restart ${var.docker_unit}."
+  impact      = 0.7
+  tags = {
+    app      = "docker"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.default_file
+    exists = true
+  }
+  check "no-tcp" "file" {
+    path = var.default_file
+    content_match {
+      pattern = "^[^#]*-H\\s+tcp://"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "docker-service-07" {
+  title       = "Docker Engine meets the minimum version"
+  description = "The server version reported by docker version is compared to ${var.min_version} with sort -V."
+  remediation = "Upgrade docker-ce (or docker.io) to ${var.min_version} or later via the distribution package manager and restart ${var.docker_unit}."
+  impact      = 0.7
+  tags = {
+    app      = "docker"
+    category = "updates"
+    severity = "high"
+    nist     = "SI-2"
+    iso27001 = "A.8.8"
+  }
+  ref {
+    title = "Docker Engine release notes"
+    url   = "https://docs.docker.com/engine/release-notes/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "server-version" "command" {
+    cmd = "printf '%s\\n' '${var.min_version}' \"$(docker version --format '{{.Server.Version}}' 2>/dev/null)\" | sort -V | head -n1"
+    stdout_match {
+      pattern = var.min_version
+      mode    = "exact"
+    }
+  }
+  check "server-reachable" "command" {
+    cmd = "docker version --format '{{.Server.Version}}'"
+    stdout_match {
+      pattern = "^[0-9]+\\.[0-9]+"
+      mode    = "regex"
+    }
+  }
+}
+
+control "docker-service-08" {
+  title       = "Membership of the docker group is limited to approved accounts"
+  description = "Members of ${var.docker_group} can start privileged containers and therefore are root. The group line in /etc/group must list only the accounts in docker_group_members (none by default)."
+  remediation = "gpasswd -d <user> ${var.docker_group} for every unapproved member, or add approved accounts to the docker_group_members variable."
+  impact      = 0.9
+  tags = {
+    app      = "docker"
+    category = "auth"
+    severity = "critical"
+    nist     = "AC-2,AC-6"
+    iso27001 = "A.5.15,A.8.2"
+  }
+  ref {
+    title = "Docker docs: Docker daemon attack surface"
+    url   = "https://docs.docker.com/engine/security/#docker-daemon-attack-surface"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-2, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.15, A.8.2"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path = "/etc/group"
+    content_match {
+      pattern = "^${var.docker_group}:"
+      mode    = "regex"
+    }
+  }
+  check "group-line" "file" {
+    path = "/etc/group"
+    content_match {
+      pattern = "^${var.docker_group}:[^:]*:[0-9]+:((${join("|", var.docker_group_members)})(,(${join("|", var.docker_group_members)}))*)?$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "docker-service-09" {
+  title       = "Unit files of the daemon and socket are root-owned and not writable by others"
+  description = "Whoever can edit docker.service or docker.socket controls the daemon's command line and the socket's ownership at the next reload."
+  remediation = "chown root:root ${var.docker_unit_file} ${var.docker_socket_unit_file} && chmod 0644 ${var.docker_unit_file} ${var.docker_socket_unit_file}"
+  impact      = 0.6
+  tags = {
+    app      = "docker"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "AC-3,CM-5"
+    iso27001 = "A.8.3,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, CM-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "service-unit" "file" {
+    path        = var.docker_unit_file
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+  }
+  check "socket-unit" "file" {
+    path        = var.docker_socket_unit_file
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+  }
+}
+
+control "docker-service-10" {
+  title       = "Docker data root is root-owned and not accessible by others"
+  description = "${var.data_root} holds image layers, volumes and container filesystems, including secrets written into volumes; it must be root:root 0710 or tighter."
+  remediation = "chown root:root ${var.data_root} && chmod 0710 ${var.data_root}"
+  impact      = 0.7
+  tags = {
+    app      = "docker"
+    category = "filesystem"
+    severity = "high"
+    nist     = "AC-3,SC-28"
+    iso27001 = "A.8.3"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, SC-28"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "data-root" "directory" {
+    path        = var.data_root
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0710"
+  }
+}

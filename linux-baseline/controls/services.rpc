@@ -1,0 +1,346 @@
+# Unnecessary services, cron permissions, login banners and host naming.
+
+control "base-svc-01" {
+  title       = "Legacy network services are not installed"
+  description = "telnet, rsh, xinetd and NIS transmit credentials in clear text or provide trivially spoofable trust. Neither the server packages nor the clients belong on a hardened host."
+  remediation = "Remove the packages: 'apt-get purge telnetd rsh-server rsh-redone-server xinetd nis' or 'dnf remove telnet-server rsh-server xinetd ypserv ypbind'."
+  impact      = 0.8
+  tags = {
+    app      = "linux-baseline"
+    category = "network"
+    severity = "high"
+    nist     = "CM-7,SC-8"
+    iso27001 = "A.8.20,A.8.21"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7, SC-8"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.21"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "telnetd" "package" {
+    name      = "telnetd"
+    installed = false
+  }
+
+  check "telnet-server" "package" {
+    name      = "telnet-server"
+    installed = false
+  }
+
+  check "rsh-server" "package" {
+    name      = "rsh-server"
+    installed = false
+  }
+
+  check "rsh-redone-server" "package" {
+    name      = "rsh-redone-server"
+    installed = false
+  }
+
+  check "xinetd" "package" {
+    name      = "xinetd"
+    installed = false
+  }
+
+  check "nis" "package" {
+    name      = "nis"
+    installed = false
+  }
+
+  check "ypserv" "package" {
+    name      = "ypserv"
+    installed = false
+  }
+
+  check "ypbind" "package" {
+    name      = "ypbind"
+    installed = false
+  }
+}
+
+control "base-svc-02" {
+  title       = "Legacy clients are not installed"
+  description = "The telnet, rsh and NIS clients send credentials in clear text; even without a server on the host they invite their use against other systems."
+  remediation = "Remove the packages: 'apt-get purge telnet rsh-client rsh-redone-client' or 'dnf remove telnet rsh'."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "network"
+    severity = "low"
+    nist     = "CM-7"
+    iso27001 = "A.8.21"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.21"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "telnet" "package" {
+    name      = "telnet"
+    installed = false
+  }
+
+  check "rsh-client" "package" {
+    name      = "rsh-client"
+    installed = false
+  }
+
+  check "rsh" "package" {
+    name      = "rsh"
+    installed = false
+  }
+
+  check "rsh-redone-client" "package" {
+    name      = "rsh-redone-client"
+    installed = false
+  }
+}
+
+control "base-cron-01" {
+  title       = "System crontab and cron directories are root-only"
+  description = "The system crontab and the cron.d, cron.hourly, cron.daily, cron.weekly and cron.monthly directories run commands as root. If other users can read them they learn what runs when; if they can write, they run as root."
+  remediation = "chown root:root ${var.crontab_file} && chmod 0600 ${var.crontab_file}; for each of ${var.cron_conf_dir}/cron.d cron.hourly cron.daily cron.weekly cron.monthly: chown root:root and chmod 0700."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "AC-6,CM-6"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.crontab_file
+    exists = true
+  }
+
+  check "crontab" "file" {
+    path        = var.crontab_file
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0600"
+  }
+
+  check "cron-d" "directory" {
+    path        = "${var.cron_conf_dir}/cron.d"
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0700"
+  }
+
+  check "cron-hourly" "directory" {
+    path        = "${var.cron_conf_dir}/cron.hourly"
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0700"
+  }
+
+  check "cron-daily" "directory" {
+    path        = "${var.cron_conf_dir}/cron.daily"
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0700"
+  }
+
+  check "cron-weekly" "directory" {
+    path        = "${var.cron_conf_dir}/cron.weekly"
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0700"
+  }
+
+  check "cron-monthly" "directory" {
+    path        = "${var.cron_conf_dir}/cron.monthly"
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0700"
+  }
+}
+
+control "base-banner-01" {
+  title       = "Login banners do not leak the operating system"
+  description = "issue and issue.net are shown before authentication, to anyone who connects. They must exist, be root-owned, and contain neither the agetty escapes that print kernel and OS details (\\v \\r \\m \\s) nor distribution names."
+  remediation = "Replace the contents of ${var.issue_file} and ${var.issue_net_file} with a legal notice such as 'Authorized uses only. All activity may be monitored and reported.' and chmod 0644 them."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "low"
+    nist     = "AC-8,SC-39"
+    iso27001 = "A.5.10,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-8, SC-39"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.10, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "issue" "file" {
+    path        = var.issue_file
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+    content_match {
+      pattern = "(\\\\[vrms]|Debian|Ubuntu|Red Hat|CentOS|Fedora|Rocky|AlmaLinux|SUSE|openSUSE|Oracle Linux|Amazon Linux)"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+
+  check "issue-net" "file" {
+    path        = var.issue_net_file
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+    content_match {
+      pattern = "(\\\\[vrms]|Debian|Ubuntu|Red Hat|CentOS|Fedora|Rocky|AlmaLinux|SUSE|openSUSE|Oracle Linux|Amazon Linux)"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "base-banner-02" {
+  title       = "Message of the day does not leak the operating system"
+  description = "motd is shown after login; it must not print kernel or distribution details either. Runs only where the file exists, since many distributions generate the motd dynamically instead."
+  remediation = "Edit ${var.motd_file} to remove agetty escapes and distribution names, and chmod 0644 it."
+  impact      = 0.3
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "low"
+    nist     = "AC-8,SC-39"
+    iso27001 = "A.5.10,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-8, SC-39"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.10, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.motd_file
+    exists = true
+  }
+
+  check "motd" "file" {
+    path        = var.motd_file
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+    content_match {
+      pattern = "(\\\\[vrms]|Debian|Ubuntu|Red Hat|CentOS|Fedora|Rocky|AlmaLinux|SUSE|openSUSE|Oracle Linux|Amazon Linux)"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}
+
+control "base-net-01" {
+  title       = "Hostname is set and persisted"
+  description = "A host still called localhost or a cloud-image default cannot be told apart in logs, certificates and inventories. The running hostname must be a valid name other than localhost and must be persisted to the hostname file."
+  remediation = "hostnamectl set-hostname <fqdn>, which also writes ${var.hostname_file}."
+  impact      = 0.3
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "low"
+    nist     = "CM-8,CM-6"
+    iso27001 = "A.5.9,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-8, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.9, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "hostname" "command" {
+    cmd         = "hostname"
+    exit_status = 0
+    stdout_match {
+      pattern = "^[A-Za-z0-9][A-Za-z0-9.-]*$"
+      mode    = "regex"
+    }
+    stdout_match {
+      pattern = "^(localhost|localhost\\.localdomain)$"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+
+  check "hostname-file" "file" {
+    path        = var.hostname_file
+    exists      = true
+    owner       = "root"
+    permissions = "<= 0644"
+    content_match {
+      pattern = "^[A-Za-z0-9][A-Za-z0-9.-]*$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "base-net-02" {
+  title       = "Static host table is sane"
+  description = "The hosts file must map 127.0.0.1 to localhost so local services resolve without DNS, and must be root-owned and not writable by others so no user can redirect names to attacker addresses."
+  remediation = "Ensure ${var.hosts_file} contains '127.0.0.1 localhost' (and '::1 localhost' where IPv6 is enabled); chown root:root and chmod 0644 it."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "network"
+    severity = "low"
+    nist     = "SC-20,CM-6"
+    iso27001 = "A.8.9,A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-20, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "hosts" "file" {
+    path        = var.hosts_file
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+    content_match {
+      pattern = "^\\s*127\\.0\\.0\\.1\\s+.*\\blocalhost\\b"
+      mode    = "regex"
+    }
+  }
+}

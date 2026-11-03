@@ -1,0 +1,309 @@
+# Protection of persistent data, secret keys and generated configuration on
+# the host. Ownership by the Harbor uid is checked with stat because the
+# containers run as a numeric uid that usually has no host account.
+
+control "harbor-fs-01" {
+  title       = "Data directory exists and is not world-writable"
+  description = "data_volume holds the database, redis dump, registry blobs, job logs and secret keys. It must exist and must not be writable by other users."
+  remediation = "mkdir -p ${var.data_dir} && chmod 0755 ${var.data_dir}"
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "AC-3,AC-6"
+    iso27001 = "A.8.3,A.5.15"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.5.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "data-dir" "directory" {
+    path        = var.data_dir
+    exists      = true
+    permissions = "<= 0755"
+  }
+}
+
+control "harbor-fs-02" {
+  title       = "Secret directory is owned by the Harbor uid and closed to other users"
+  description = "data_volume/secret holds the encryption key for stored credentials, the token-signing key and the internal registry certificate. It must belong to the uid the components run as and must not be readable by other users. Skipped when the directory does not exist."
+  remediation = "chown -R ${var.harbor_uid}:${var.harbor_uid} ${var.data_dir}/secret && chmod 0750 ${var.data_dir}/secret"
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "secrets"
+    severity = "high"
+    nist     = "SC-28,AC-3,AC-6"
+    iso27001 = "A.8.3,A.8.24"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-28, AC-3, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "directory" {
+    path   = "${var.data_dir}/secret"
+    exists = true
+  }
+  check "secret-dir-perms" "directory" {
+    path        = "${var.data_dir}/secret"
+    permissions = "<= 0750"
+  }
+  check "secret-dir-owner" "command" {
+    cmd         = "stat -c '%u' '${var.data_dir}/secret'"
+    exit_status = 0
+    stdout_match {
+      pattern = "${var.harbor_uid}"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-fs-03" {
+  title       = "Credential encryption key is readable by its owner only"
+  description = "secret/keys/secretkey encrypts every registry endpoint, replication and scanner credential stored in the database; with it the database contents decrypt offline. Skipped when the file does not exist."
+  remediation = "chown ${var.harbor_uid}:${var.harbor_uid} ${var.data_dir}/secret/keys/secretkey && chmod 0600 ${var.data_dir}/secret/keys/secretkey"
+  impact      = 0.9
+  tags = {
+    app      = "harbor"
+    category = "secrets"
+    severity = "critical"
+    nist     = "SC-12,SC-28"
+    iso27001 = "A.8.24,A.8.3"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-12, SC-28"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = "${var.data_dir}/secret/keys/secretkey"
+    exists = true
+  }
+  check "secretkey-perms" "file" {
+    path        = "${var.data_dir}/secret/keys/secretkey"
+    permissions = "<= 0600"
+  }
+  check "secretkey-owner" "command" {
+    cmd         = "stat -c '%u' '${var.data_dir}/secret/keys/secretkey'"
+    exit_status = 0
+    stdout_match {
+      pattern = "${var.harbor_uid}"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-fs-04" {
+  title       = "Registry token signing key is readable by its owner only"
+  description = "secret/core/private_key.pem signs the bearer tokens the registry trusts; anyone holding it can mint tokens for any repository. Skipped when the file does not exist."
+  remediation = "chown ${var.harbor_uid}:${var.harbor_uid} ${var.data_dir}/secret/core/private_key.pem && chmod 0600 ${var.data_dir}/secret/core/private_key.pem"
+  impact      = 0.9
+  tags = {
+    app      = "harbor"
+    category = "secrets"
+    severity = "critical"
+    nist     = "SC-12,IA-5"
+    iso27001 = "A.8.24,A.5.17"
+  }
+  ref {
+    title = "Harbor architecture overview"
+    url   = "https://github.com/goharbor/harbor/wiki/Architecture-Overview-of-Harbor"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-12, IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = "${var.data_dir}/secret/core/private_key.pem"
+    exists = true
+  }
+  check "token-key-perms" "file" {
+    path        = "${var.data_dir}/secret/core/private_key.pem"
+    permissions = "<= 0600"
+  }
+}
+
+control "harbor-fs-05" {
+  title       = "Database directory is closed to other users"
+  description = "data_volume/database is the PostgreSQL data directory with users, password hashes, robot account secrets and project ACLs. PostgreSQL itself refuses to start on a directory more open than 0750. Skipped when an external database is used and the directory does not exist."
+  remediation = "chmod 0700 ${var.data_dir}/database"
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "filesystem"
+    severity = "high"
+    nist     = "SC-28,AC-3"
+    iso27001 = "A.8.3,A.8.24"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-28, AC-3"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "directory" {
+    path   = "${var.data_dir}/database"
+    exists = true
+  }
+  check "database-dir" "directory" {
+    path        = "${var.data_dir}/database"
+    permissions = "<= 0750"
+  }
+}
+
+control "harbor-fs-06" {
+  title       = "Registry blob store is owned by the Harbor uid and not world-writable"
+  description = "data_volume/registry holds every layer and manifest. World-writable blobs let any local user replace image content behind the registry's back. Skipped when an external storage backend is used and the directory does not exist."
+  remediation = "chown -R ${var.harbor_uid}:${var.harbor_uid} ${var.data_dir}/registry && chmod 0755 ${var.data_dir}/registry"
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "filesystem"
+    severity = "high"
+    nist     = "AC-3,SI-7"
+    iso27001 = "A.8.3,A.8.9"
+  }
+  ref {
+    title = "Harbor: Configure the Harbor YML File"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/configure-yml-file/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, SI-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "directory" {
+    path   = "${var.data_dir}/registry"
+    exists = true
+  }
+  check "registry-dir-perms" "directory" {
+    path        = "${var.data_dir}/registry"
+    permissions = "<= 0755"
+  }
+  check "registry-dir-owner" "command" {
+    cmd         = "stat -c '%u' '${var.data_dir}/registry'"
+    exit_status = 0
+    stdout_match {
+      pattern = "${var.harbor_uid}"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-fs-07" {
+  title       = "Generated component environment files are not world-readable"
+  description = "prepare renders common/config/<component>/env with the admin password, database password, CORE_SECRET, JOBSERVICE_SECRET, CSRF key and registry credentials in clear text. Each must stay at the 0640 prepare assigns or tighter. Skipped when the core env file does not exist."
+  remediation = "chmod 0640 ${var.harbor_dir}/common/config/*/env, or re-run ./prepare which regenerates them with restrictive modes."
+  impact      = 0.9
+  tags = {
+    app      = "harbor"
+    category = "secrets"
+    severity = "critical"
+    nist     = "SC-28,AC-3,IA-5"
+    iso27001 = "A.8.3,A.5.17"
+  }
+  ref {
+    title = "Harbor: Reconfigure Harbor and Manage the Harbor Lifecycle"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/reconfigure-manage-lifecycle/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-28, AC-3, IA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.5.17"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = "${var.harbor_dir}/common/config/core/env"
+    exists = true
+  }
+  check "core-env" "file" {
+    path        = "${var.harbor_dir}/common/config/core/env"
+    permissions = "<= 0640"
+  }
+  check "jobservice-env" "file" {
+    path        = "${var.harbor_dir}/common/config/jobservice/env"
+    permissions = "<= 0640"
+  }
+  check "db-env" "file" {
+    path        = "${var.harbor_dir}/common/config/db/env"
+    permissions = "<= 0640"
+  }
+  check "registryctl-env" "file" {
+    path        = "${var.harbor_dir}/common/config/registryctl/env"
+    permissions = "<= 0640"
+  }
+}
+
+control "harbor-fs-08" {
+  title       = "Generated compose file is owned by the operator and not writable by others"
+  description = "docker-compose.yml is what docker compose up runs; a write by another user changes images, mounts and capabilities of the whole deployment on the next restart. Skipped when the file does not exist."
+  remediation = "chown ${var.config_owner} ${var.harbor_dir}/docker-compose.yml && chmod 0644 ${var.harbor_dir}/docker-compose.yml"
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "filesystem"
+    severity = "high"
+    nist     = "CM-5,AC-3"
+    iso27001 = "A.8.9,A.8.3"
+  }
+  ref {
+    title = "Harbor: Reconfigure Harbor and Manage the Harbor Lifecycle"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/reconfigure-manage-lifecycle/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-5, AC-3"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = "${var.harbor_dir}/docker-compose.yml"
+    exists = true
+  }
+  check "compose-perms" "file" {
+    path        = "${var.harbor_dir}/docker-compose.yml"
+    owner       = var.config_owner
+    permissions = "<= 0644"
+  }
+}

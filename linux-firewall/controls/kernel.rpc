@@ -1,0 +1,271 @@
+# Kernel network parameters. These apply regardless of the firewall backend.
+
+control "fw-kern-01" {
+  title       = "Reverse path filtering is enabled"
+  description = "net.ipv4.conf.all.rp_filter and conf.default.rp_filter must be 1 (strict) so packets with a source address that is not routable back through the receiving interface are dropped."
+  remediation = "Set net.ipv4.conf.all.rp_filter = 1 and net.ipv4.conf.default.rp_filter = 1 in /etc/sysctl.d/ and run 'sysctl --system'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "hardening"
+    severity = "medium"
+    nist     = "SC-7,SC-5"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, SC-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "rp-filter-all" "kernel_param" {
+    param = "net.ipv4.conf.all.rp_filter"
+    value = "1"
+  }
+
+  check "rp-filter-default" "kernel_param" {
+    param = "net.ipv4.conf.default.rp_filter"
+    value = "1"
+  }
+}
+
+control "fw-kern-02" {
+  title       = "ICMP redirects are not accepted"
+  description = "Accepting ICMP redirects lets an on-link attacker rewrite the host's routing table. Both the all and default interfaces must have accept_redirects = 0."
+  remediation = "Set net.ipv4.conf.all.accept_redirects = 0 and net.ipv4.conf.default.accept_redirects = 0 in /etc/sysctl.d/ and run 'sysctl --system'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-firewall"
+    category = "hardening"
+    severity = "high"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "accept-redirects-all" "kernel_param" {
+    param = "net.ipv4.conf.all.accept_redirects"
+    value = "0"
+  }
+
+  check "accept-redirects-default" "kernel_param" {
+    param = "net.ipv4.conf.default.accept_redirects"
+    value = "0"
+  }
+
+  check "secure-redirects-all" "kernel_param" {
+    param = "net.ipv4.conf.all.secure_redirects"
+    value = "0"
+  }
+}
+
+control "fw-kern-03" {
+  title       = "ICMP redirects are not sent"
+  description = "A host that is not a router has no reason to send ICMP redirects; doing so leaks topology and can be abused to misdirect neighbours."
+  remediation = "Set net.ipv4.conf.all.send_redirects = 0 and net.ipv4.conf.default.send_redirects = 0 in /etc/sysctl.d/ and run 'sysctl --system'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "hardening"
+    severity = "medium"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "send-redirects-all" "kernel_param" {
+    param = "net.ipv4.conf.all.send_redirects"
+    value = "0"
+  }
+
+  check "send-redirects-default" "kernel_param" {
+    param = "net.ipv4.conf.default.send_redirects"
+    value = "0"
+  }
+}
+
+control "fw-kern-04" {
+  title       = "Broadcast ICMP echo requests are ignored"
+  description = "Answering broadcast pings makes the host a smurf amplification reflector. net.ipv4.icmp_echo_ignore_broadcasts must be 1, and bogus ICMP error responses should be ignored too."
+  remediation = "Set net.ipv4.icmp_echo_ignore_broadcasts = 1 and net.ipv4.icmp_ignore_bogus_error_responses = 1 in /etc/sysctl.d/ and run 'sysctl --system'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "hardening"
+    severity = "medium"
+    nist     = "SC-5,SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-5, SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "ignore-broadcasts" "kernel_param" {
+    param = "net.ipv4.icmp_echo_ignore_broadcasts"
+    value = "1"
+  }
+
+  check "ignore-bogus-errors" "kernel_param" {
+    param = "net.ipv4.icmp_ignore_bogus_error_responses"
+    value = "1"
+  }
+}
+
+control "fw-kern-05" {
+  title       = "Martian packets are logged"
+  description = "Packets with impossible source addresses (martians) indicate spoofing or misconfiguration and must be logged for investigation."
+  remediation = "Set net.ipv4.conf.all.log_martians = 1 and net.ipv4.conf.default.log_martians = 1 in /etc/sysctl.d/ and run 'sysctl --system'."
+  impact      = 0.4
+  tags = {
+    app      = "linux-firewall"
+    category = "logging"
+    severity = "low"
+    nist     = "AU-2,SI-4"
+    iso27001 = "A.8.15,A.8.16"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, SI-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "log-martians-all" "kernel_param" {
+    param = "net.ipv4.conf.all.log_martians"
+    value = "1"
+  }
+
+  check "log-martians-default" "kernel_param" {
+    param = "net.ipv4.conf.default.log_martians"
+    value = "1"
+  }
+}
+
+control "fw-kern-06" {
+  title       = "IPv6 router advertisements are not accepted"
+  description = "Servers with static IPv6 addressing must not accept router advertisements, which would let a rogue neighbour inject routes and prefixes. Runs only when var.ipv6_enabled is true."
+  remediation = "Set net.ipv6.conf.all.accept_ra = 0 and net.ipv6.conf.default.accept_ra = 0 in /etc/sysctl.d/ and run 'sysctl --system'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "hardening"
+    severity = "medium"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test \"${var.ipv6_enabled}\" = true && test -d /proc/sys/net/ipv6"
+    exit_status = 0
+  }
+
+  check "accept-ra-all" "kernel_param" {
+    param = "net.ipv6.conf.all.accept_ra"
+    value = "0"
+  }
+
+  check "accept-ra-default" "kernel_param" {
+    param = "net.ipv6.conf.default.accept_ra"
+    value = "0"
+  }
+
+  check "ipv6-accept-redirects" "kernel_param" {
+    param = "net.ipv6.conf.all.accept_redirects"
+    value = "0"
+  }
+}
+
+control "fw-kern-07" {
+  title       = "IP forwarding matches the host role"
+  description = "net.ipv4.ip_forward must equal var.ip_forward: 0 on ordinary servers, 1 only on routers, container hosts and hypervisors that deliberately forward traffic."
+  remediation = "Set net.ipv4.ip_forward = ${var.ip_forward} in /etc/sysctl.d/ and run 'sysctl --system'; check that no container runtime or VPN re-enables it."
+  impact      = 0.7
+  tags = {
+    app      = "linux-firewall"
+    category = "hardening"
+    severity = "high"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "ip-forward" "kernel_param" {
+    param = "net.ipv4.ip_forward"
+    value = var.ip_forward
+  }
+}
+
+control "fw-kern-08" {
+  title       = "Source-routed packets are rejected and SYN cookies are on"
+  description = "Source routing lets a sender dictate the return path and bypass filtering; it must be disabled. TCP SYN cookies keep the host responsive under SYN flood."
+  remediation = "Set net.ipv4.conf.all.accept_source_route = 0, net.ipv4.conf.default.accept_source_route = 0 and net.ipv4.tcp_syncookies = 1 in /etc/sysctl.d/ and run 'sysctl --system'."
+  impact      = 0.6
+  tags = {
+    app      = "linux-firewall"
+    category = "hardening"
+    severity = "medium"
+    nist     = "SC-5,SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-5, SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "accept-source-route-all" "kernel_param" {
+    param = "net.ipv4.conf.all.accept_source_route"
+    value = "0"
+  }
+
+  check "accept-source-route-default" "kernel_param" {
+    param = "net.ipv4.conf.default.accept_source_route"
+    value = "0"
+  }
+
+  check "tcp-syncookies" "kernel_param" {
+    param = "net.ipv4.tcp_syncookies"
+    value = "1"
+  }
+}

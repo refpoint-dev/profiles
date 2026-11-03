@@ -1,0 +1,169 @@
+# Whole-system checks: one release across all components and the API health
+# endpoint.
+
+control "harbor-health-12" {
+  title       = "All components run the same release"
+  description = "Harbor ships every component image with one release tag; a mix of tags means a partial upgrade."
+  remediation = "docker compose down && docker compose up -d from a single release bundle."
+  impact      = 0.5
+  tags = {
+    app      = "harbor"
+    category = "updates"
+    severity = "medium"
+    nist     = "CM-2,SI-2"
+    iso27001 = "A.8.8,A.8.32"
+  }
+  ref {
+    title = "Harbor: Upgrade Harbor and Migrate Data"
+    url   = "https://goharbor.io/docs/2.15.0/administration/upgrade/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-2, SI-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8, A.8.32"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "single-tag" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.proxy_container}|${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.log_container}|${var.trivy_container}|${var.exporter_container})' | xargs docker inspect -f '{{.Config.Image}}' | awk -F: '{print $NF}' | sort -u | awk '{print} END{exit NR != 1}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-health-13" {
+  title       = "Health endpoint reports the system and every core component healthy"
+  description = "GET /api/v2.0/health is unauthenticated and returns an overall status plus one entry per component, sorted by name. The response is saved to health_file on the target and then read with the json resource so each key is asserted individually: the overall status and the name and status of core, database, jobservice, portal, redis, registry and registryctl."
+  remediation = "Read the components list in the health response and the matching log in /var/log/harbor; docker compose up -d restarts a stopped component."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "SI-4,CP-10"
+    iso27001 = "A.8.16,A.8.14"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-4, CP-10"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.16, A.8.14"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "fetch" "command" {
+    cmd         = "curl -ksS -o '${var.health_file}' -w '%%{http_code}' '${trimsuffix(var.base_url, "/")}/api/v2.0/health'"
+    exit_status = 0
+    stdout_match {
+      pattern = "200"
+      mode    = "exact"
+    }
+  }
+  check "components" "json" {
+    path = var.health_file
+    query ".status" {
+      equals     = "healthy"
+    }
+    query ".components[0].name" {
+      equals     = "core"
+    }
+    query ".components[0].status" {
+      equals     = "healthy"
+    }
+    query ".components[1].name" {
+      equals     = "database"
+    }
+    query ".components[1].status" {
+      equals     = "healthy"
+    }
+    query ".components[2].name" {
+      equals     = "jobservice"
+    }
+    query ".components[2].status" {
+      equals     = "healthy"
+    }
+    query ".components[3].name" {
+      equals     = "portal"
+    }
+    query ".components[3].status" {
+      equals     = "healthy"
+    }
+    query ".components[4].name" {
+      equals     = "redis"
+    }
+    query ".components[4].status" {
+      equals     = "healthy"
+    }
+    query ".components[5].name" {
+      equals     = "registry"
+    }
+    query ".components[5].status" {
+      equals     = "healthy"
+    }
+    query ".components[6].name" {
+      equals     = "registryctl"
+    }
+    query ".components[6].status" {
+      equals     = "healthy"
+    }
+  }
+}
+
+control "harbor-health-14" {
+  title       = "Health endpoint reports the Trivy scanner healthy"
+  description = "The trivy entry is the last component in the health response and is present only when the adapter is installed. Checked only when require_trivy is true."
+  remediation = "docker compose up -d trivy-adapter; check /var/log/harbor/trivy-adapter.log."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "medium"
+    nist     = "SI-4,RA-5"
+    iso27001 = "A.8.16,A.8.8"
+  }
+  ref {
+    title = "Harbor: Vulnerability Scanning"
+    url   = "https://goharbor.io/docs/2.15.0/administration/vulnerability-scanning/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SI-4, RA-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.16, A.8.8"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "printf '%s' '${var.require_trivy}' | grep -qx true && docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "fetch" "command" {
+    cmd         = "curl -ksS -o '${var.health_file}' -w '%%{http_code}' '${var.base_url}/api/v2.0/health'"
+    exit_status = 0
+    stdout_match {
+      pattern = "200"
+      mode    = "exact"
+    }
+  }
+  check "trivy" "json" {
+    path = var.health_file
+    query ".components[7].name" {
+      equals     = "trivy"
+    }
+    query ".components[7].status" {
+      equals     = "healthy"
+    }
+  }
+}

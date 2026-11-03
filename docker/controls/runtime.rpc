@@ -1,0 +1,180 @@
+# Effective daemon posture as reported by docker info, plus the kernel
+# parameters bridge networking depends on.
+
+control "docker-runtime-01" {
+  title       = "Daemon applies a seccomp profile"
+  description = "docker info must list seccomp among its security options; without it containers run with the full syscall table."
+  remediation = "Ensure the kernel has CONFIG_SECCOMP and the daemon is not started with --seccomp-profile=unconfined; restart ${var.docker_unit}."
+  impact      = 0.7
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "high"
+    nist     = "CM-7,SC-39"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "Docker docs: Seccomp security profiles"
+    url   = "https://docs.docker.com/engine/security/seccomp/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7, SC-39"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "security-options" "command" {
+    cmd = "docker info --format '{{join .SecurityOptions \"\\n\"}}'"
+    stdout_match {
+      pattern = "^name=seccomp"
+      mode    = "regex"
+    }
+  }
+}
+
+control "docker-runtime-02" {
+  title       = "Daemon applies AppArmor confinement"
+  description = "Only evaluated when apparmor_required is true. On Debian and Ubuntu hosts the docker-default AppArmor profile must be active for containers."
+  remediation = "apt install apparmor apparmor-utils, ensure the apparmor service is running, then restart ${var.docker_unit}."
+  impact      = 0.6
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "medium"
+    nist     = "AC-3,CM-7"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "Docker docs: AppArmor security profiles"
+    url   = "https://docs.docker.com/engine/security/apparmor/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.apparmor_required}' = 'true'"
+    exit_status = 0
+  }
+  check "apparmor" "command" {
+    cmd = "docker info --format '{{join .SecurityOptions \"\\n\"}}'"
+    stdout_match {
+      pattern = "^name=apparmor"
+      mode    = "regex"
+    }
+  }
+  check "apparmor-enforcing" "mac" {
+    enabled = true
+    system  = "apparmor"
+  }
+}
+
+control "docker-runtime-03" {
+  title       = "Daemon runs on cgroup v2"
+  description = "cgroup v2 is required for rootless resource limits and current kernels' isolation features; hybrid or v1 hosts are legacy."
+  remediation = "Boot with systemd.unified_cgroup_hierarchy=1 (or a distribution that defaults to cgroup v2) and restart ${var.docker_unit}."
+  impact      = 0.4
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "low"
+    nist     = "CM-6,SC-39"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "Docker docs: Runtime metrics (cgroup v2)"
+    url   = "https://docs.docker.com/engine/containers/runmetrics/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, SC-39"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "cgroup-version" "command" {
+    cmd = "docker info --format '{{.CgroupVersion}}'"
+    stdout_match {
+      pattern = "2"
+      mode    = "exact"
+    }
+  }
+}
+
+control "docker-runtime-04" {
+  title       = "Daemon runs in rootless mode"
+  description = "Only evaluated when rootless_required is true. docker info must report rootless among its security options."
+  remediation = "Install docker-ce-rootless-extras and run dockerd-rootless-setuptool.sh install as the service user; disable the system-wide daemon."
+  impact      = 0.7
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "high"
+    nist     = "AC-6,SC-39"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "Docker docs: Run the Docker daemon as a non-root user"
+    url   = "https://docs.docker.com/engine/security/rootless/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, SC-39"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.rootless_required}' = 'true'"
+    exit_status = 0
+  }
+  check "rootless" "command" {
+    cmd = "docker info --format '{{join .SecurityOptions \"\\n\"}}'"
+    stdout_match {
+      pattern = "^name=rootless"
+      mode    = "regex"
+    }
+  }
+}
+
+control "docker-runtime-05" {
+  title       = "Kernel forwards and filters bridged container traffic"
+  description = "net.ipv4.ip_forward must be 1 for published ports to work, and net.bridge.bridge-nf-call-iptables must be 1 so container-to-container traffic on the bridge passes through the host firewall rules the daemon installs."
+  remediation = "sysctl -w net.ipv4.ip_forward=1 net.bridge.bridge-nf-call-iptables=1 and persist both in /etc/sysctl.d/99-docker.conf (load br_netfilter at boot)."
+  impact      = 0.5
+  tags = {
+    app      = "docker"
+    category = "network"
+    severity = "medium"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20,A.8.9"
+  }
+  ref {
+    title = "Docker docs: Packet filtering and firewalls"
+    url   = "https://docs.docker.com/engine/network/packet-filtering-firewalls/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "ip-forward" "kernel_param" {
+    param = "net.ipv4.ip_forward"
+    value = "1"
+  }
+  check "bridge-nf-call-iptables" "kernel_param" {
+    param = "net.bridge.bridge-nf-call-iptables"
+    value = "1"
+  }
+}

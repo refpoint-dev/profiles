@@ -1,0 +1,459 @@
+# daemon.json policy. Every control gates on the file being present so a host
+# that configures dockerd purely through unit-file flags is skipped, not failed.
+
+control "docker-daemon-01" {
+  title       = "Inter-container communication on the default bridge is disabled"
+  description = "With icc enabled every container on the default bridge can reach every other one. daemon.json must set \"icc\": false so links or user-defined networks are required for traffic between containers."
+  remediation = "Add \"icc\": false to ${var.daemon_json} and restart ${var.docker_unit}."
+  impact      = 0.7
+  tags = {
+    app      = "docker"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7,CM-7"
+    iso27001 = "A.8.20,A.8.22"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.22"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.daemon_json
+    exists = true
+  }
+  check "icc" "json" {
+    path = var.daemon_json
+    query ".icc" {
+      exists     = true
+      equals     = false
+    }
+  }
+}
+
+control "docker-daemon-02" {
+  title       = "Live restore keeps containers running across daemon restarts"
+  description = "\"live-restore\": true lets containers survive a dockerd upgrade or crash instead of being stopped with it."
+  remediation = "Add \"live-restore\": true to ${var.daemon_json} and restart ${var.docker_unit}."
+  impact      = 0.5
+  tags = {
+    app      = "docker"
+    category = "availability"
+    severity = "medium"
+    nist     = "CP-10,CM-6"
+    iso27001 = "A.8.14,A.8.9"
+  }
+  ref {
+    title = "Docker docs: Live restore"
+    url   = "https://docs.docker.com/engine/daemon/live-restore/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.daemon_json
+    exists = true
+  }
+  check "live-restore" "json" {
+    path = var.daemon_json
+    query ".live-restore" {
+      exists     = true
+      equals     = true
+    }
+  }
+}
+
+control "docker-daemon-03" {
+  title       = "Userland proxy is disabled"
+  description = "The docker-proxy process runs as root for every published port; with hairpin NAT available it is unnecessary attack surface."
+  remediation = "Add \"userland-proxy\": false to ${var.daemon_json} and restart ${var.docker_unit}."
+  impact      = 0.5
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "medium"
+    nist     = "CM-7,AC-6"
+    iso27001 = "A.8.9,A.8.2"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.2"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.daemon_json
+    exists = true
+  }
+  check "userland-proxy" "json" {
+    path = var.daemon_json
+    query ".userland-proxy" {
+      exists     = true
+      equals     = false
+    }
+  }
+}
+
+control "docker-daemon-04" {
+  title       = "Containers cannot gain new privileges by default"
+  description = "\"no-new-privileges\": true sets the PR_SET_NO_NEW_PRIVS flag on every container so setuid binaries inside images cannot escalate."
+  remediation = "Add \"no-new-privileges\": true to ${var.daemon_json} and restart ${var.docker_unit}."
+  impact      = 0.8
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "high"
+    nist     = "AC-6,CM-7"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.daemon_json
+    exists = true
+  }
+  check "no-new-privileges" "json" {
+    path = var.daemon_json
+    query ".no-new-privileges" {
+      exists     = true
+      equals     = true
+    }
+  }
+}
+
+control "docker-daemon-05" {
+  title       = "Logging driver is set and container logs are rotated"
+  description = "daemon.json must select the ${var.log_driver} log driver and bound log growth with max-size and max-file so a chatty container cannot fill the data root."
+  remediation = "Set \"log-driver\": \"${var.log_driver}\" and \"log-opts\": {\"max-size\": \"10m\", \"max-file\": \"5\"} in ${var.daemon_json}; restart ${var.docker_unit}."
+  impact      = 0.6
+  tags = {
+    app      = "docker"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-4,AU-12,CM-6"
+    iso27001 = "A.8.15,A.8.9"
+  }
+  ref {
+    title = "Docker docs: Configure logging drivers"
+    url   = "https://docs.docker.com/engine/logging/configure/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-4, AU-12, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.daemon_json
+    exists = true
+  }
+  check "log-driver" "json" {
+    path = var.daemon_json
+    query ".log-driver" {
+      exists     = true
+      equals     = var.log_driver
+    }
+  }
+  check "log-rotation" "json" {
+    path = var.daemon_json
+    query ".log-opts.max-size" {
+      exists     = true
+      type       = "string"
+    }
+    query ".log-opts.max-file" {
+      exists     = true
+    }
+  }
+}
+
+control "docker-daemon-06" {
+  title       = "User namespace remapping is configured"
+  description = "Only evaluated when userns_remap_required is true. userns-remap maps container root to an unprivileged host uid so a container breakout does not land as host root."
+  remediation = "Add \"userns-remap\": \"${var.userns_remap_value}\" to ${var.daemon_json}, ensure the dockremap entries exist in /etc/subuid and /etc/subgid, then restart ${var.docker_unit}."
+  impact      = 0.7
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "high"
+    nist     = "AC-6,SC-39"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "Docker docs: Isolate containers with a user namespace"
+    url   = "https://docs.docker.com/engine/security/userns-remap/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, SC-39"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.userns_remap_required}' = 'true' && test -f '${var.daemon_json}'"
+    exit_status = 0
+  }
+  check "userns-remap" "json" {
+    path = var.daemon_json
+    query ".userns-remap" {
+      exists     = true
+      equals     = var.userns_remap_value
+    }
+  }
+}
+
+control "docker-daemon-07" {
+  title       = "Default ulimits are set for containers"
+  description = "default-ulimits in daemon.json bounds file descriptors (and optionally processes) per container so one workload cannot exhaust host limits."
+  remediation = "Add \"default-ulimits\": {\"nofile\": {\"Name\": \"nofile\", \"Hard\": 65536, \"Soft\": 32768}} to ${var.daemon_json} and restart ${var.docker_unit}."
+  impact      = 0.4
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "low"
+    nist     = "SC-5,SC-6"
+    iso27001 = "A.8.6,A.8.9"
+  }
+  ref {
+    title = "Docker docs: dockerd reference (default-ulimits)"
+    url   = "https://docs.docker.com/reference/cli/dockerd/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-5, SC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.6, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.daemon_json
+    exists = true
+  }
+  check "nofile" "json" {
+    path = var.daemon_json
+    query ".default-ulimits.nofile" {
+      exists = true
+      type   = "object"
+    }
+  }
+}
+
+control "docker-daemon-08" {
+  title       = "A custom seccomp profile is applied by default"
+  description = "Only evaluated when seccomp_profile_required is true. The daemon must point seccomp-profile at ${var.seccomp_profile_path} and that file must be root-owned and not writable by others."
+  remediation = "Place the profile at ${var.seccomp_profile_path} (chmod 0644, chown root:root), add \"seccomp-profile\": \"${var.seccomp_profile_path}\" to ${var.daemon_json} and restart ${var.docker_unit}."
+  impact      = 0.6
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "medium"
+    nist     = "CM-7,SI-7"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "Docker docs: Seccomp security profiles"
+    url   = "https://docs.docker.com/engine/security/seccomp/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7, SI-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.seccomp_profile_required}' = 'true' && test -f '${var.daemon_json}'"
+    exit_status = 0
+  }
+  check "seccomp-profile" "json" {
+    path = var.daemon_json
+    query ".seccomp-profile" {
+      exists     = true
+      equals     = var.seccomp_profile_path
+    }
+  }
+  check "profile-file" "file" {
+    path        = var.seccomp_profile_path
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+  }
+}
+
+control "docker-daemon-09" {
+  title       = "Experimental features are disabled"
+  description = "Experimental daemon features are unsupported and may change security behaviour; production hosts must not enable them."
+  remediation = "Remove \"experimental\": true from ${var.daemon_json} (or set it to false) and restart ${var.docker_unit}."
+  impact      = 0.4
+  tags = {
+    app      = "docker"
+    category = "hardening"
+    severity = "low"
+    nist     = "CM-7,CM-6"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.daemon_json
+    exists = true
+  }
+  any_of "experimental-off" {
+    check "absent" "json" {
+      path = var.daemon_json
+      query ".experimental" {
+        exists = false
+      }
+    }
+    check "false" "json" {
+      path = var.daemon_json
+      query ".experimental" {
+        equals     = false
+      }
+    }
+  }
+}
+
+control "docker-daemon-10" {
+  title       = "No insecure registries are configured"
+  description = "insecure-registries disables TLS verification for image pulls, allowing a network attacker to substitute images. The list must be absent or empty."
+  remediation = "Remove the insecure-registries entry from ${var.daemon_json}, front internal registries with TLS, and restart ${var.docker_unit}."
+  impact      = 0.8
+  tags = {
+    app      = "docker"
+    category = "tls"
+    severity = "high"
+    nist     = "SC-8,SI-7"
+    iso27001 = "A.8.24,A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-8, SI-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.24, A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "file" {
+    path   = var.daemon_json
+    exists = true
+  }
+  any_of "insecure-registries" {
+    check "absent" "json" {
+      path = var.daemon_json
+      query ".insecure-registries" {
+        exists = false
+      }
+    }
+    check "empty" "json" {
+      path = var.daemon_json
+      query ".insecure-registries" {
+        length     = 0
+      }
+    }
+  }
+}
+
+control "docker-daemon-11" {
+  title       = "Registry mirrors point at an approved mirror over TLS"
+  description = "Only evaluated when registry_mirrors_required is true. registry-mirrors must be present and its first entry must match ${var.registry_mirror_pattern}."
+  remediation = "Add \"registry-mirrors\": [\"https://mirror.example.internal\"] to ${var.daemon_json} and restart ${var.docker_unit}."
+  impact      = 0.5
+  tags = {
+    app      = "docker"
+    category = "updates"
+    severity = "medium"
+    nist     = "CM-6,SC-8,SI-7"
+    iso27001 = "A.8.9,A.8.24"
+  }
+  ref {
+    title = "Docker docs: Registry as a pull through cache"
+    url   = "https://docs.docker.com/docker-hub/image-library/mirror/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, SC-8, SI-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.24"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test '${var.registry_mirrors_required}' = 'true' && test -f '${var.daemon_json}'"
+    exit_status = 0
+  }
+  check "registry-mirrors" "json" {
+    path = var.daemon_json
+    query ".registry-mirrors" {
+      exists = true
+      type   = "array"
+    }
+    query ".registry-mirrors[0]" {
+      matches    = var.registry_mirror_pattern
+    }
+  }
+}
+
+control "docker-daemon-12" {
+  title       = "daemon.json and the Docker configuration directory are root-owned and not writable by others"
+  description = "A user who can edit daemon.json controls the next daemon start. ${var.config_dir} must be root:root 0755 or tighter and ${var.daemon_json} root:root 0644 or tighter."
+  remediation = "chown root:root ${var.config_dir} ${var.daemon_json} && chmod 0755 ${var.config_dir} && chmod 0644 ${var.daemon_json}"
+  impact      = 0.7
+  tags = {
+    app      = "docker"
+    category = "filesystem"
+    severity = "high"
+    nist     = "AC-3,AC-6,CM-5"
+    iso27001 = "A.8.3,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6, CM-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.3, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  check "config-dir" "directory" {
+    path        = var.config_dir
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0755"
+  }
+  check "daemon-json" "file" {
+    path        = var.daemon_json
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+  }
+}

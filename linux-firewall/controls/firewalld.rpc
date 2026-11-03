@@ -1,0 +1,340 @@
+# firewalld. Every control is gated on the firewalld package so ufw and
+# plain nftables hosts skip this file entirely.
+
+control "fw-fwd-01" {
+  title       = "firewalld service is running and enabled"
+  description = "firewalld must be active now and at boot. 'firewall-cmd --state' confirms the daemon answers over D-Bus, which an enabled-but-crashed unit would not."
+  remediation = "Run 'systemctl enable --now ${var.firewalld_service}' and check 'firewall-cmd --state'."
+  impact      = 1.0
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "critical"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "firewalld"
+    installed = true
+  }
+
+  check "service" "service" {
+    name    = var.firewalld_service
+    running = true
+    enabled = true
+  }
+
+  check "state" "command" {
+    cmd         = "firewall-cmd --state"
+    exit_status = 0
+    stdout_match {
+      pattern = "running"
+      mode    = "exact"
+    }
+  }
+}
+
+control "fw-fwd-02" {
+  title       = "firewalld default zone is the expected zone"
+  description = "Interfaces without an explicit zone binding land in the default zone, so it must be the hardened zone named by var.default_zone. The runtime value and the persisted DefaultZone= line are both checked."
+  remediation = "Run 'firewall-cmd --set-default-zone=${var.default_zone}'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "firewalld"
+    installed = true
+  }
+
+  check "runtime-default-zone" "command" {
+    cmd         = "firewall-cmd --get-default-zone"
+    exit_status = 0
+    stdout_match {
+      pattern = var.default_zone
+      mode    = "exact"
+    }
+  }
+
+  check "persisted-default-zone" "file" {
+    path = var.firewalld_conf
+    content_match {
+      pattern = "^\\s*DefaultZone=${var.default_zone}\\s*$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-fwd-03" {
+  title       = "Default zone target rejects unmatched traffic"
+  description = "The zone target decides what happens to packets no rule matches. It must be var.zone_target (default: 'default', which rejects) rather than ACCEPT."
+  remediation = "Run 'firewall-cmd --permanent --zone=${var.default_zone} --set-target=${var.zone_target}' followed by 'firewall-cmd --reload'."
+  impact      = 0.9
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "high"
+    nist     = "SC-7"
+    iso27001 = "A.8.20"
+  }
+  ref {
+    title = "firewalld documentation: zone targets"
+    url   = "https://firewalld.org/documentation/zone/options.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "firewalld"
+    installed = true
+  }
+
+  check "zone-target" "command" {
+    cmd         = "firewall-cmd --permanent --zone=${var.default_zone} --get-target"
+    exit_status = 0
+    stdout_match {
+      pattern = var.zone_target
+      mode    = "exact"
+    }
+  }
+}
+
+control "fw-fwd-04" {
+  title       = "SSH is allowed in the default zone"
+  description = "Either the ssh service or the raw SSH port must be permitted in the default zone; otherwise administrators are locked out after the next reload."
+  remediation = "Run 'firewall-cmd --permanent --zone=${var.default_zone} --add-service=ssh' (or '--add-port=${var.ssh_port}/tcp' for a non-standard port) and 'firewall-cmd --reload'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "availability"
+    severity = "medium"
+    nist     = "SC-7,CM-6"
+    iso27001 = "A.8.20,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "firewalld"
+    installed = true
+  }
+
+  any_of "ssh-allowed" {
+    check "ssh-service" "command" {
+      cmd         = "firewall-cmd --zone=${var.default_zone} --query-service=ssh"
+      exit_status = 0
+    }
+    check "ssh-port" "command" {
+      cmd         = "firewall-cmd --zone=${var.default_zone} --query-port=${var.ssh_port}/tcp"
+      exit_status = 0
+    }
+  }
+}
+
+control "fw-fwd-05" {
+  title       = "dhcpv6-client service is not exposed in the default zone"
+  description = "Many distributions ship the dhcpv6-client service in the public zone by default. On servers with static addressing it only widens the attack surface. This control runs unless var.allow_dhcpv6_client is true."
+  remediation = "Run 'firewall-cmd --permanent --zone=${var.default_zone} --remove-service=dhcpv6-client' and 'firewall-cmd --reload'."
+  impact      = 0.4
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "low"
+    nist     = "CM-7,SC-7"
+    iso27001 = "A.8.20,A.8.21"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7, SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.21"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test \"${var.allow_dhcpv6_client}\" = false && firewall-cmd --state"
+    exit_status = 0
+  }
+
+  check "dhcpv6-client-absent" "command" {
+    cmd         = "firewall-cmd --zone=${var.default_zone} --query-service=dhcpv6-client"
+    exit_status = 1
+    stdout_match {
+      pattern = "no"
+      mode    = "exact"
+    }
+  }
+}
+
+control "fw-fwd-06" {
+  title       = "cockpit service is not exposed in the default zone"
+  description = "The cockpit web console is pre-authorised in the public zone on some distributions. Unless the console is intentionally in use (var.allow_cockpit) it must be removed from the zone."
+  remediation = "Run 'firewall-cmd --permanent --zone=${var.default_zone} --remove-service=cockpit' and 'firewall-cmd --reload'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "network"
+    severity = "medium"
+    nist     = "CM-7,SC-7"
+    iso27001 = "A.8.20,A.8.21"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7, SC-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.21"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "test \"${var.allow_cockpit}\" = false && firewall-cmd --state"
+    exit_status = 0
+  }
+
+  check "cockpit-absent" "command" {
+    cmd         = "firewall-cmd --zone=${var.default_zone} --query-service=cockpit"
+    exit_status = 1
+    stdout_match {
+      pattern = "no"
+      mode    = "exact"
+    }
+  }
+}
+
+control "fw-fwd-07" {
+  title       = "firewalld panic mode is off"
+  description = "Panic mode drops every packet including established sessions. It is an incident response switch, not a steady state, and a host left in panic mode is unreachable for management."
+  remediation = "Run 'firewall-cmd --panic-off'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "availability"
+    severity = "medium"
+    nist     = "CM-6"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "firewalld"
+    installed = true
+  }
+
+  check "panic-off" "command" {
+    cmd         = "firewall-cmd --query-panic"
+    exit_status = 1
+    stdout_match {
+      pattern = "no"
+      mode    = "exact"
+    }
+  }
+}
+
+control "fw-fwd-08" {
+  title       = "firewalld logs denied packets"
+  description = "LogDenied must be set to a value other than off so that rejected or dropped packets are logged and available for monitoring."
+  remediation = "Run 'firewall-cmd --set-log-denied=unicast' (or all) and verify with 'firewall-cmd --get-log-denied'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12,SI-4"
+    iso27001 = "A.8.15,A.8.16"
+  }
+  ref {
+    title = "firewall-cmd manual page: --set-log-denied"
+    url   = "https://firewalld.org/documentation/man-pages/firewall-cmd.html"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, SI-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "firewalld"
+    installed = true
+  }
+
+  check "log-denied" "command" {
+    cmd         = "firewall-cmd --get-log-denied"
+    exit_status = 0
+    stdout_match {
+      pattern = "^(all|unicast|broadcast|multicast)$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "fw-fwd-09" {
+  title       = "firewalld.conf is root-owned and not world-writable"
+  description = "The main configuration file controls the default zone, log policy and lockdown mode; if a non-root user can edit it the firewall policy can be silently changed."
+  remediation = "chown root:root ${var.firewalld_conf} && chmod 0644 ${var.firewalld_conf}"
+  impact      = 0.5
+  tags = {
+    app      = "linux-firewall"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "AC-6,CM-6"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "firewalld"
+    installed = true
+  }
+
+  check "conf-perms" "file" {
+    path        = var.firewalld_conf
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0644"
+  }
+}

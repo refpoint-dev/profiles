@@ -1,0 +1,166 @@
+# Privilege escalation through sudo.
+
+control "base-sudo-01" {
+  title       = "sudo is installed"
+  description = "sudo provides per-command, per-user delegation with logging, which is what makes disabling direct root login (base-ssh-03) workable. Either the sudo or sudo-ldap package must be present."
+  remediation = "Install sudo: 'apt-get install sudo' or 'dnf install sudo'."
+  impact      = 0.7
+  tags = {
+    app      = "linux-baseline"
+    category = "auth"
+    severity = "high"
+    nist     = "AC-6,AU-2"
+    iso27001 = "A.8.2,A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, AU-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "sudo-installed" {
+    check "sudo" "package" {
+      name      = "sudo"
+      installed = true
+    }
+    check "sudo-ldap" "package" {
+      name      = "sudo-ldap"
+      installed = true
+    }
+  }
+}
+
+control "base-sudo-02" {
+  title       = "sudoers file and drop-in directory are protected"
+  description = "sudoers must be 0440 root:root and the drop-in directory must not be accessible to others; a writable sudoers grants root to whoever can edit it, and a readable one reveals which accounts to target."
+  remediation = "chown root:root ${var.sudoers_file} && chmod 0440 ${var.sudoers_file}; chown root:root ${var.sudoers_dir} && chmod 0750 ${var.sudoers_dir}"
+  impact      = 0.8
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "high"
+    nist     = "AC-6,CM-6"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "sudoers manual page: FILES"
+    url   = "https://www.sudo.ws/docs/man/sudoers.man/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "sudo"
+    installed = true
+  }
+
+  check "sudoers" "file" {
+    path        = var.sudoers_file
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0440"
+  }
+
+  check "sudoers-d" "directory" {
+    path        = var.sudoers_dir
+    exists      = true
+    owner       = "root"
+    group       = "root"
+    permissions = "<= 0750"
+  }
+}
+
+control "base-sudo-03" {
+  title       = "sudo commands run in a pseudo-terminal"
+  description = "Defaults use_pty makes sudo run the command in its own pty, which prevents a malicious program from retaining access to the user's terminal (TIOCSTI injection) after sudo exits. The setting may live in sudoers or any drop-in."
+  remediation = "Add 'Defaults use_pty' to ${var.sudoers_file} via visudo, or to a file in ${var.sudoers_dir}."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "medium"
+    nist     = "AC-6,SC-4"
+    iso27001 = "A.8.2"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, SC-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "sudo"
+    installed = true
+  }
+
+  any_of "use-pty" {
+    check "sudoers" "file" {
+      path = var.sudoers_file
+      content_match {
+        pattern = "^\\s*Defaults\\s+([^#]*,\\s*)?use_pty\\b"
+        mode    = "regex"
+      }
+    }
+    check "sudoers-d" "folder_contents" {
+      path = var.sudoers_dir
+      content_match {
+        pattern = "^\\s*Defaults\\s+([^#]*,\\s*)?use_pty\\b"
+        mode    = "regex"
+      }
+    }
+  }
+}
+
+control "base-sudo-04" {
+  title       = "sudo writes its own log file"
+  description = "Defaults logfile= gives sudo a dedicated log of every invocation, independent of syslog routing, so privileged command history survives a syslog outage and is easy to ship. The setting may live in sudoers or any drop-in."
+  remediation = "Add 'Defaults logfile=\"/var/log/sudo.log\"' to ${var.sudoers_file} via visudo, or to a file in ${var.sudoers_dir}."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "package" {
+    name      = "sudo"
+    installed = true
+  }
+
+  any_of "logfile" {
+    check "sudoers" "file" {
+      path = var.sudoers_file
+      content_match {
+        pattern = "^\\s*Defaults\\s+([^#]*,\\s*)?logfile\\s*="
+        mode    = "regex"
+      }
+    }
+    check "sudoers-d" "folder_contents" {
+      path = var.sudoers_dir
+      content_match {
+        pattern = "^\\s*Defaults\\s+([^#]*,\\s*)?logfile\\s*="
+        mode    = "regex"
+      }
+    }
+  }
+}

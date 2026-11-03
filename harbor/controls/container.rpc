@@ -1,0 +1,423 @@
+# Runtime settings of the component containers, read from the Docker API.
+# "All components" checks select the running containers whose names match
+# the configured component names, so a deployment without the bundled
+# database, redis, scanner or exporter is not penalised for their absence.
+
+control "harbor-ctr-01" {
+  title       = "Core components are running"
+  description = "Proxy, core, portal, jobservice, registry and registryctl are mandatory in every installer deployment; a stopped one means pushes, pulls, the UI or background jobs are down. Gated on the proxy container existing."
+  remediation = "cd ${var.harbor_dir} && docker compose up -d; inspect ${var.log_dir} for the failing component."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4"
+    iso27001 = "A.8.14,A.8.16"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14, A.8.16"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "proxy" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.proxy_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "core" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.core_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "portal" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.portal_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "jobservice" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.jobservice_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "registry" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.registry_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+  check "registryctl" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.registryctl_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-ctr-02" {
+  title       = "Bundled database container is running"
+  description = "When the bundled PostgreSQL container exists it must be running; core and jobservice fail every request without it. Skipped when an external database is used and the container is absent."
+  remediation = "cd ${var.harbor_dir} && docker compose up -d postgresql; check ${var.log_dir}/postgresql.log."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4"
+    iso27001 = "A.8.14"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.db_container}'"
+    exit_status = 0
+  }
+  check "state" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.db_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-ctr-03" {
+  title       = "Bundled redis container is running"
+  description = "Redis holds sessions, job queues and the registry cache. Skipped when an external redis is used and the container is absent."
+  remediation = "cd ${var.harbor_dir} && docker compose up -d redis; check ${var.log_dir}/redis.log."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "high"
+    nist     = "CP-10,SI-4"
+    iso27001 = "A.8.14"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10, SI-4"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.redis_container}'"
+    exit_status = 0
+  }
+  check "state" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.redis_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-ctr-04" {
+  title       = "Log collector container is running"
+  description = "Every other component ships its logs over syslog to the collector. When it is down the Docker syslog driver blocks or drops component output and nothing reaches ${var.log_dir}. Skipped when log.external_endpoint replaces the collector and the container is absent."
+  remediation = "cd ${var.harbor_dir} && docker compose up -d log."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "logging"
+    severity = "medium"
+    nist     = "AU-2,AU-12,AU-5"
+    iso27001 = "A.8.15"
+  }
+  ref {
+    title = "Harbor: Troubleshooting Harbor Installation"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/troubleshoot-installation/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-2, AU-12, AU-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps -a --format '{{.Names}}' | grep -qx '${var.log_container}'"
+    exit_status = 0
+  }
+  check "state" "command" {
+    cmd         = "docker inspect -f '{{.State.Running}}' '${var.log_container}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "true"
+      mode    = "exact"
+    }
+  }
+}
+
+control "harbor-ctr-05" {
+  title       = "Component images come from the Harbor project and carry a release tag"
+  description = "Every Harbor container must run an image under ${var.image_repo_prefix} pinned to a release tag (vMAJOR.MINOR.PATCH), never :latest or :dev, so upgrades are deliberate and the image provenance is known."
+  remediation = "Install from an official release bundle whose docker-compose.yml pins goharbor/<component>:v<version>; do not edit image references to :latest or :dev."
+  impact      = 0.6
+  tags = {
+    app      = "harbor"
+    category = "container"
+    severity = "medium"
+    nist     = "CM-2,CM-6,SI-2,SR-11"
+    iso27001 = "A.8.9,A.8.32"
+  }
+  ref {
+    title = "Harbor releases"
+    url   = "https://github.com/goharbor/harbor/releases"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-2, CM-6, SI-2, SR-11"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.32"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "image-refs" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.proxy_container}|${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.log_container}|${var.trivy_container}|${var.exporter_container})' | xargs docker inspect -f '{{.Name}} {{.Config.Image}}' | awk -v p='${var.image_repo_prefix}' 'index($2, p) != 1 || $2 !~ /:v?[0-9]+\\.[0-9]+\\.[0-9]+/ || $2 ~ /:(latest|dev)$/ {bad=1; print} END{if (NR == 0) exit 2; exit bad}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-ctr-06" {
+  title       = "All components run the same release"
+  description = "Harbor ships every component image with one release tag. Mixed tags after a partial upgrade leave database schema, API and job contracts out of step."
+  remediation = "cd ${var.harbor_dir} && docker compose down && docker compose up -d from a single release bundle."
+  impact      = 0.5
+  tags = {
+    app      = "harbor"
+    category = "updates"
+    severity = "medium"
+    nist     = "CM-2,SI-2"
+    iso27001 = "A.8.8,A.8.32"
+  }
+  ref {
+    title = "Harbor: Upgrade Harbor and Migrate Data"
+    url   = "https://goharbor.io/docs/2.15.0/administration/upgrade/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-2, SI-2"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.8, A.8.32"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "single-tag" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.proxy_container}|${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.log_container}|${var.trivy_container}|${var.exporter_container})' | xargs docker inspect -f '{{.Config.Image}}' | awk -F: '{print $NF}' | sort -u | awk 'END{exit NR != 1}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-ctr-07" {
+  title       = "Every component restarts automatically"
+  description = "The compose file sets restart: always on every service so the registry survives daemon and host restarts. A container without it stays down after a reboot."
+  remediation = "Restore restart: always for the service in ${var.harbor_dir}/docker-compose.yml (or docker update --restart=always <container>) and recreate it."
+  impact      = 0.5
+  tags = {
+    app      = "harbor"
+    category = "availability"
+    severity = "medium"
+    nist     = "CP-10"
+    iso27001 = "A.8.14"
+  }
+  ref {
+    title = "Harbor: Reconfigure Harbor and Manage the Harbor Lifecycle"
+    url   = "https://goharbor.io/docs/2.15.0/install-config/reconfigure-manage-lifecycle/"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CP-10"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.14"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "restart-policy" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.proxy_container}|${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.log_container}|${var.trivy_container}|${var.exporter_container})' | xargs docker inspect -f '{{.Name}} {{.HostConfig.RestartPolicy.Name}}' | awk '$2 !~ /^(always|unless-stopped)$/ {bad=1; print} END{if (NR == 0) exit 2; exit bad}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-ctr-08" {
+  title       = "No component runs privileged"
+  description = "The shipped compose file runs every component unprivileged. A privileged container hands the process every host capability and device."
+  remediation = "Remove privileged: true from the service in ${var.harbor_dir}/docker-compose.yml and recreate it."
+  impact      = 0.9
+  tags = {
+    app      = "harbor"
+    category = "container"
+    severity = "critical"
+    nist     = "AC-6,CM-7"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "not-privileged" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.proxy_container}|${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.log_container}|${var.trivy_container}|${var.exporter_container})' | xargs docker inspect -f '{{.Name}} {{.HostConfig.Privileged}}' | awk '$2 != \"false\" {bad=1; print} END{if (NR == 0) exit 2; exit bad}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-ctr-09" {
+  title       = "Every component drops all capabilities"
+  description = "The shipped compose file sets cap_drop: ALL on every service and adds back only what each one needs. A container that has lost that line runs with the Docker default capability set."
+  remediation = "Restore cap_drop: [ALL] (and the shipped cap_add list) for the service in ${var.harbor_dir}/docker-compose.yml and recreate it."
+  impact      = 0.7
+  tags = {
+    app      = "harbor"
+    category = "container"
+    severity = "high"
+    nist     = "AC-6,CM-7"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "cap-drop-all" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.proxy_container}|${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.log_container}|${var.trivy_container}|${var.exporter_container})' | xargs docker inspect -f '{{.Name}} {{.HostConfig.CapDrop}}' | awk '$2 != \"[ALL]\" {bad=1; print} END{if (NR == 0) exit 2; exit bad}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-ctr-10" {
+  title       = "No component shares the host network or PID namespace"
+  description = "All components communicate over the dedicated harbor bridge network; --network host or --pid host exposes internal listeners (registry 5000, core 8080, database 5432, redis 6379) directly on the host and lets a compromised component see every host process."
+  remediation = "Remove network_mode: host and pid: host from the service in ${var.harbor_dir}/docker-compose.yml and recreate it."
+  impact      = 0.8
+  tags = {
+    app      = "harbor"
+    category = "container"
+    severity = "high"
+    nist     = "SC-7,AC-6,CM-7"
+    iso27001 = "A.8.20,A.8.22"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: SC-7, AC-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.20, A.8.22"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "namespaces" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.proxy_container}|${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.log_container}|${var.trivy_container}|${var.exporter_container})' | xargs docker inspect -f '{{.Name}} {{.HostConfig.NetworkMode}} {{.HostConfig.PidMode}}' | awk '$2 ~ /^(host|none|bridge|default)$/ || $3 == \"host\" {bad=1; print} END{if (NR == 0) exit 2; exit bad}'"
+    exit_status = 0
+  }
+}
+
+control "harbor-ctr-11" {
+  title       = "No component mounts the Docker engine socket"
+  description = "Harbor needs no access to the container engine. A mounted docker.sock is root on the host for whichever component is compromised."
+  remediation = "Remove the /var/run/docker.sock volume from the service in ${var.harbor_dir}/docker-compose.yml and recreate it."
+  impact      = 0.9
+  tags = {
+    app      = "harbor"
+    category = "container"
+    severity = "critical"
+    nist     = "AC-6,AC-3"
+    iso27001 = "A.8.2,A.8.3"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, AC-3"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+  only_if "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -qx '${var.proxy_container}'"
+    exit_status = 0
+  }
+  check "no-socket-mount" "command" {
+    cmd         = "docker ps --format '{{.Names}}' | grep -xE '(${var.proxy_container}|${var.core_container}|${var.portal_container}|${var.jobservice_container}|${var.registry_container}|${var.registryctl_container}|${var.db_container}|${var.redis_container}|${var.log_container}|${var.trivy_container}|${var.exporter_container})' | xargs docker inspect -f '{{range .Mounts}}{{.Source}}{{println}}{{end}}'"
+    exit_status = 0
+    stdout_match {
+      pattern = "docker\\.sock$"
+      mode    = "regex"
+      negate  = true
+    }
+  }
+}

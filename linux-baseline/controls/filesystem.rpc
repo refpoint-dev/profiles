@@ -1,0 +1,329 @@
+# Filesystem partitioning, mount options, kernel module blacklists and
+# filesystem-wide permission sweeps.
+
+control "base-fs-01" {
+  title       = "/tmp is a separate filesystem mounted nodev, nosuid and noexec"
+  description = "A dedicated /tmp filesystem stops temporary files from filling the root filesystem and lets it be mounted with options that prevent device files, setuid binaries and program execution in a world-writable location."
+  remediation = "Create a dedicated volume or tmpfs for ${var.tmp_mount} in /etc/fstab with the options ${join(",", var.tmp_mount_options)} and remount."
+  impact      = 0.6
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "CM-6,CM-7"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "tmp" "mount" {
+    path    = var.tmp_mount
+    mounted = true
+    options = var.tmp_mount_options
+  }
+}
+
+control "base-fs-02" {
+  title       = "/dev/shm is mounted nodev, nosuid and noexec"
+  description = "The shared-memory tmpfs is world-writable; without noexec it is a convenient staging area for attackers to run downloaded binaries from."
+  remediation = "Add 'tmpfs ${var.dev_shm_mount} tmpfs defaults,${join(",", var.dev_shm_mount_options)} 0 0' to /etc/fstab and remount."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "CM-6,CM-7"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "dev-shm" "mount" {
+    path    = var.dev_shm_mount
+    mounted = true
+    options = var.dev_shm_mount_options
+  }
+}
+
+control "base-fs-03" {
+  title       = "/var is a separate filesystem mounted nodev and nosuid"
+  description = "Variable data (spool, cache, mail) grows unpredictably; a dedicated filesystem keeps a runaway service from exhausting the root filesystem and allows nodev/nosuid to be applied."
+  remediation = "Create a dedicated volume for ${var.var_mount} in /etc/fstab with the options ${join(",", var.var_mount_options)} and migrate the data."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "low"
+    nist     = "CM-6,SC-5"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, SC-5"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "var" "mount" {
+    path    = var.var_mount
+    mounted = true
+    options = var.var_mount_options
+  }
+}
+
+control "base-fs-04" {
+  title       = "/var/log is a separate filesystem mounted nodev, nosuid and noexec"
+  description = "Logs on their own filesystem cannot be used to fill the root or /var filesystem by a log flood, and the mount options prevent executables from being planted among them."
+  remediation = "Create a dedicated volume for ${var.var_log_mount} in /etc/fstab with the options ${join(",", var.var_log_mount_options)} and migrate the logs."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "low"
+    nist     = "AU-9,CM-6"
+    iso27001 = "A.8.9,A.8.15"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AU-9, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9, A.8.15"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "var-log" "mount" {
+    path    = var.var_log_mount
+    mounted = true
+    options = var.var_log_mount_options
+  }
+}
+
+control "base-fs-05" {
+  title       = "/home is a separate filesystem mounted nodev and nosuid"
+  description = "User home directories on a dedicated filesystem cannot exhaust system storage, and nodev/nosuid stop users from planting device nodes or setuid binaries."
+  remediation = "Create a dedicated volume for ${var.home_mount} in /etc/fstab with the options ${join(",", var.home_mount_options)} and migrate the home directories."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "low"
+    nist     = "CM-6,CM-7"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-6, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "home" "mount" {
+    path    = var.home_mount
+    mounted = true
+    options = var.home_mount_options
+  }
+}
+
+control "base-fs-06" {
+  title       = "Unused filesystems are disabled in modprobe.d"
+  description = "cramfs, squashfs and udf are rarely needed on servers and each carries kernel parsing code that has had vulnerabilities. Each must be neutralised with an 'install <fs> /bin/true' (or /bin/false) line in a modprobe.d fragment so it cannot be auto-loaded."
+  remediation = "Create ${var.modprobe_dir}/hardening.conf with 'install cramfs /bin/false', 'install squashfs /bin/false' and 'install udf /bin/false', then 'rmmod' any that are loaded. Omit squashfs on hosts that use snap packages."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "low"
+    nist     = "CM-7"
+    iso27001 = "A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "cramfs" "folder_contents" {
+    path = var.modprobe_dir
+    glob = "*.conf"
+    content_match {
+      pattern = "^\\s*install\\s+cramfs\\s+/bin/(true|false)\\s*$"
+      mode    = "regex"
+    }
+  }
+
+  check "squashfs" "folder_contents" {
+    path = var.modprobe_dir
+    glob = "*.conf"
+    content_match {
+      pattern = "^\\s*install\\s+squashfs\\s+/bin/(true|false)\\s*$"
+      mode    = "regex"
+    }
+  }
+
+  check "udf" "folder_contents" {
+    path = var.modprobe_dir
+    glob = "*.conf"
+    content_match {
+      pattern = "^\\s*install\\s+udf\\s+/bin/(true|false)\\s*$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "base-fs-07" {
+  title       = "USB mass storage is disabled"
+  description = "USB storage devices are a data exfiltration and malware introduction path that a server has no use for. The usb-storage module must be neutralised with an install line in modprobe.d. Hosts that legitimately need removable media should exclude this control at run time rather than weaken it."
+  remediation = "Create ${var.modprobe_dir}/usb-storage.conf with 'install usb-storage /bin/false' and 'blacklist usb-storage', then 'rmmod usb-storage'."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "hardening"
+    severity = "medium"
+    nist     = "MP-7,CM-7"
+    iso27001 = "A.7.10,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: MP-7, CM-7"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.7.10, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "usb-storage-install" "folder_contents" {
+    path = var.modprobe_dir
+    glob = "*.conf"
+    content_match {
+      pattern = "^\\s*install\\s+usb[-_]storage\\s+/bin/(true|false)\\s*$"
+      mode    = "regex"
+    }
+  }
+}
+
+control "base-fs-08" {
+  title       = "World-writable directories carry the sticky bit"
+  description = "Without the sticky bit any user can delete or rename files that other users created in a world-writable directory, which enables symlink races and data destruction. Every local filesystem is swept with find."
+  remediation = "Set the sticky bit on each reported directory: 'chmod a+t <dir>'. Or, more generally, run: df --local -P | awk '{if (NR!=1) print $6}' | xargs -I '{}' find '{}' -xdev -type d -perm -0002 ! -perm -1000 -exec chmod a+t {} +"
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "AC-3,AC-6"
+    iso27001 = "A.5.15,A.8.3"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-3, AC-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.15, A.8.3"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "sticky-bit" "command" {
+    cmd = "find ${join(" ", var.filesystem_scan_roots)} -xdev -type d -perm -0002 ! -perm -1000 -print 2>/dev/null | wc -l"
+    stdout_match {
+      pattern = "0"
+      mode    = "exact"
+    }
+  }
+}
+
+control "base-fs-09" {
+  title       = "No unowned or ungrouped files exist"
+  description = "Files whose owner or group no longer exists in the account databases are a sign of incomplete account removal. A later account created with the reused uid or gid silently gains access to them."
+  remediation = "Locate the files with 'find / -xdev -nouser -o -nogroup' and chown them to an existing account, or remove them."
+  impact      = 0.4
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "low"
+    nist     = "AC-2,AC-3"
+    iso27001 = "A.5.16,A.5.18"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-2, AC-3"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.5.16, A.5.18"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  check "no-unowned" "command" {
+    cmd = "find ${join(" ", var.filesystem_scan_roots)} -xdev -nouser -print 2>/dev/null | wc -l"
+    stdout_match {
+      pattern = "0"
+      mode    = "exact"
+    }
+  }
+
+  check "no-ungrouped" "command" {
+    cmd = "find ${join(" ", var.filesystem_scan_roots)} -xdev -nogroup -print 2>/dev/null | wc -l"
+    stdout_match {
+      pattern = "0"
+      mode    = "exact"
+    }
+  }
+}
+
+control "base-fs-10" {
+  title       = "GRUB configuration is root-owned and not readable by others"
+  description = "grub.cfg may contain the boot loader password hash and reveals kernel command line parameters (audit, selinux, init) that an attacker could use to plan a bypass. It must be 0600 root:root. Either the Debian-family or the RHEL-family path must satisfy the check."
+  remediation = "chown root:root ${var.grub_cfg_debian} (or ${var.grub_cfg_rhel}) && chmod 0600 the file. On EFI systems with the config on the vfat ESP, set fmask=0077 in /etc/fstab instead."
+  impact      = 0.5
+  tags = {
+    app      = "linux-baseline"
+    category = "filesystem"
+    severity = "medium"
+    nist     = "AC-6,CM-6"
+    iso27001 = "A.8.2,A.8.9"
+  }
+  ref {
+    title = "NIST SP 800-53 Rev. 5: AC-6, CM-6"
+    url   = "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+  }
+  ref {
+    title = "ISO/IEC 27001:2022 Annex A: A.8.2, A.8.9"
+    url   = "https://www.iso.org/standard/27001"
+  }
+
+  any_of "grub-cfg-protected" {
+    check "debian" "file" {
+      path        = var.grub_cfg_debian
+      exists      = true
+      owner       = "root"
+      group       = "root"
+      permissions = "<= 0600"
+    }
+    check "rhel" "file" {
+      path        = var.grub_cfg_rhel
+      exists      = true
+      owner       = "root"
+      group       = "root"
+      permissions = "<= 0600"
+    }
+  }
+}
